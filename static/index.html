@@ -187,6 +187,7 @@
     color: var(--ink); cursor: pointer;
     display: grid; place-items: center;
     transition: transform .15s ease, border-color .25s, box-shadow .3s;
+    touch-action: none; user-select: none; -webkit-user-select: none;
   }
   .ptt:hover { transform: scale(1.04); border-color: var(--muted); }
   .ptt:active { transform: scale(.96); }
@@ -314,7 +315,7 @@
       <line x1="12" y1="18" x2="12" y2="21.5"/>
     </svg>
   </button>
-  <div class="hint" id="hint">tap to talk</div>
+  <div class="hint" id="hint">tap to talk · hold mic or space to keep it open</div>
 
   <details class="console" id="console">
     <summary>latency console <span class="ttfa-mini" id="ttfa-mini"></span></summary>
@@ -373,7 +374,7 @@ function setState(next, label) {
   document.body.dataset.state = next;
   $("status-label").textContent = label || next;
   $("hint").textContent = {
-    idle: "tap to talk",
+    idle: "tap to talk · hold mic or space to keep it open",
     listening: "listening — tap when done",
     thinking: "thinking…",
     speaking: "tap to interrupt",
@@ -460,16 +461,20 @@ function startListening() {
   rec = new SR();
   rec.lang = "en-US";
   rec.interimResults = true;
+  rec.continuous = true; // we decide when to stop: tap = first final, hold = release
   rec.onresult = (e) => {
     let interim = "";
+    let finals = "";
     for (const res of e.results) {
-      if (res.isFinal) finalText += res[0].transcript;
+      if (res.isFinal) finals += res[0].transcript;
       else interim += res[0].transcript;
     }
+    finalText = finals; // rebuilt every event — continuous mode repeats past results
     bubble.textContent = (finalText + interim).trim() || "…";
     scrollDown();
     if (e.results[e.results.length - 1].isFinal) {
-      if (!t.transcript_final) t.transcript_final = Date.now();
+      t.transcript_final = Date.now(); // last final wins (hold mode can have several)
+      if (!holdActive) rec.stop(); // tap mode: auto-stop at the first final, as before
     } else {
       t.last_interim = Date.now(); // proxy for speech end if VAD is unavailable
     }
@@ -503,11 +508,54 @@ function startListening() {
   setState("listening");
 }
 
-$("ptt").addEventListener("click", () => {
-  if (state === "listening") { rec?.stop(); return; }
-  if (state === "thinking") return;
-  if (state === "speaking") { speechSynthesis.cancel(); setState("idle"); return; }
+/* ── push-to-talk: tap = auto-endpoint, hold (mic or space) = manual ── */
+const HOLD_MS = 350;
+let holdActive = false; // a press is currently in progress
+let pressT0 = 0;
+let pressStartedListening = false;
+
+function pressDown() {
+  if (!SR || state === "thinking") return;
+  if (state === "speaking") { speechSynthesis.cancel(); setState("idle"); }
+  holdActive = true;
+  if (state === "listening") { pressStartedListening = false; return; } // tap-to-stop on release
+  pressT0 = Date.now();
+  pressStartedListening = true;
   startListening();
+  $("hint").textContent = "release to send · keep holding to keep the mic open";
+}
+
+function pressUp() {
+  const wasHold = Date.now() - pressT0 >= HOLD_MS;
+  const startedHere = pressStartedListening;
+  holdActive = false;
+  if (state !== "listening") return;
+  if (!startedHere || wasHold) {
+    rec?.stop(); // tap while already listening, or hold released: send now
+  } else {
+    $("hint").textContent = "listening — tap when done"; // quick tap: auto-endpoint mode
+  }
+}
+
+const ptt = $("ptt");
+ptt.addEventListener("pointerdown", (e) => { e.preventDefault(); pressDown(); });
+ptt.addEventListener("contextmenu", (e) => e.preventDefault());
+window.addEventListener("pointerup", () => { if (holdActive) pressUp(); });
+window.addEventListener("pointercancel", () => { if (holdActive) pressUp(); });
+
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || e.repeat) return;
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+  e.preventDefault();
+  pressDown();
+});
+document.addEventListener("keyup", (e) => {
+  if (e.code !== "Space") return;
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+  e.preventDefault();
+  if (holdActive) pressUp();
 });
 
 /* ── typed fallback (also handy for evaluation) ─────── */

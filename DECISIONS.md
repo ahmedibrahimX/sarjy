@@ -87,6 +87,15 @@ refreshes live when remember_fact fires mid-conversation, and lets the user
 delete any fact (visibility + control). Prioritized over a Postgres
 migration because it's evaluator-visible; internal tooling isn't.
 
+## Push-to-talk: tap = auto-endpoint, hold = manual endpoint
+
+Chrome's recognizer finalizes after a fixed silence window, which cuts off
+anyone who pauses to think mid-sentence. Tap keeps the quick flow (auto-send
+at the first final result, as before); holding the mic button or the space
+bar keeps recognition open through pauses and sends on release, walkie-talkie
+style. Recognition runs `continuous = true` in both cases — the only
+difference is who decides the turn is over, Chrome's endpointer or the user.
+
 ## True speech end via a parallel mic-energy VAD
 
 Chrome's `speechend` fires when the recognizer finalizes, not when the user
