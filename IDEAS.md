@@ -12,3 +12,6 @@ candidates or presentation "what I'd do next" material.
 - Wake word ("Hey Sarjy") instead of push-to-talk.
 - Voice picker UI for `speechSynthesis` voices.
 - Per-user metrics dashboard aggregating waterfalls across turns (p50/p95).
+- Managed Postgres (Railway add-on) if live DB inspection over JDBC becomes a
+  real requirement — today the token-gated snapshot export covers it (DBeaver
+  opens SQLite files natively).

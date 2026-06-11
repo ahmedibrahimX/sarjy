@@ -69,6 +69,24 @@ gives a quick way to exercise the pipeline without a mic (it stamps
 It deliberately lives in the debug console, not the main UI — Sarjy is
 voice-first, and the minimum bar is voice.
 
+## Remote DB access: snapshot export, not a database server
+
+JDBC tools need a server process speaking a wire protocol; SQLite is an
+embedded library — there is no port to expose, and the bridges that fake one
+(postlite, sqld) are experimental or unsupported by standard tools. The
+token-gated `GET /admin/db` endpoint returns a consistent snapshot (SQLite
+backup API), which DBeaver opens natively as a local file. Managed Postgres
+is parked in IDEAS.md for when live inspection becomes a real requirement.
+A Railway volume keeps the data across deploys.
+
+## Memories sidebar: make the memory system legible
+
+Cross-session memory is a minimum-bar requirement, but invisible state is
+hard to demo and hard to trust. The sidebar shows exactly what Sarjy stored,
+refreshes live when remember_fact fires mid-conversation, and lets the user
+delete any fact (visibility + control). Prioritized over a Postgres
+migration because it's evaluator-visible; internal tooling isn't.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is
