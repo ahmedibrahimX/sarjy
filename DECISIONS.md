@@ -60,6 +60,15 @@ settled, so there's no requirements.txt to drift out of date. pytest stays a
 dev-only dependency group — plain asserts keep the 2–3 memory-layer tests
 readable, and it never ships in the runtime image.
 
+## Typed-input fallback lives inside the latency console
+
+The Web Speech API only ships in Chromium browsers. A small text input in the
+latency console keeps the demo usable for evaluators on Firefox/Safari and
+gives a quick way to exercise the pipeline without a mic (it stamps
+`t_speech_end = t_transcript_final = now`, so waterfalls stay comparable).
+It deliberately lives in the debug console, not the main UI — Sarjy is
+voice-first, and the minimum bar is voice.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is
