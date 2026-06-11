@@ -329,7 +329,7 @@
         </div>
         <div class="wf" id="wf-rows"></div>
         <div class="wf-server" id="wf-server"></div>
-        <div class="wf-note">client rows use the client clock, server readout uses the server clock — never mixed. TTFA is measured entirely client-side.</div>
+        <div class="wf-note" id="wf-note">client rows use the client clock, server readout uses the server clock — never mixed. TTFA is measured entirely client-side.</div>
       </div>
       <form class="type-fallback" id="type-form">
         <input id="type-input" placeholder="no mic? type to Sarjy instead…" autocomplete="off">
@@ -404,6 +404,44 @@ function scrollDown() {
 /* ── per-turn client timestamps (Date.now, ms epoch) ── */
 let t = {};
 
+/* ── mic-energy VAD: stamps the true acoustic speech end ──
+   Chrome's speechend fires when the recognizer *finalizes*, not when the
+   user stops talking, so the endpointing delay is invisible to the Web
+   Speech API. A parallel analyser on the raw mic stream records the last
+   moment the signal was above the noise floor — that is the real speech
+   end, and the basis for perceived time-to-first-audio. */
+const vad = { stream: null, ctx: null, raf: 0, lastVoice: 0, noise: 0.004 };
+
+async function vadStart() {
+  try {
+    vad.lastVoice = 0;
+    vad.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    vad.ctx = new AudioContext();
+    const analyser = vad.ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    vad.ctx.createMediaStreamSource(vad.stream).connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+    const tick = () => {
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const rms = Math.sqrt(sum / buf.length);
+      if (rms < vad.noise * 2) vad.noise = vad.noise * 0.95 + rms * 0.05; // track floor while quiet
+      if (rms > Math.min(0.06, Math.max(0.01, vad.noise * 4))) vad.lastVoice = Date.now();
+      vad.raf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch { /* best-effort: waterfall falls back to the interim-result proxy */ }
+}
+
+function vadStop() {
+  cancelAnimationFrame(vad.raf);
+  vad.stream?.getTracks().forEach((track) => track.stop());
+  vad.ctx?.close();
+  vad.stream = null;
+  vad.ctx = null;
+}
+
 /* ── speech recognition ─────────────────────────────── */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (!SR) {
@@ -416,6 +454,7 @@ let rec = null;
 function startListening() {
   speechSynthesis.cancel();
   t = {};
+  vadStart();
   const bubble = addBubble("user", "…");
   let finalText = "";
   rec = new SR();
@@ -429,13 +468,16 @@ function startListening() {
     }
     bubble.textContent = (finalText + interim).trim() || "…";
     scrollDown();
-    if (e.results[e.results.length - 1].isFinal && !t.transcript_final) {
-      t.transcript_final = Date.now();
+    if (e.results[e.results.length - 1].isFinal) {
+      if (!t.transcript_final) t.transcript_final = Date.now();
+    } else {
+      t.last_interim = Date.now(); // proxy for speech end if VAD is unavailable
     }
   };
   rec.onspeechend = () => { if (!t.speech_end) t.speech_end = Date.now(); };
   rec.onerror = (e) => {
     finalText = "";
+    vadStop();
     bubble.remove();
     setState("idle");
     if (e.error !== "no-speech" && e.error !== "aborted") toast(`mic error: ${e.error}`);
@@ -443,12 +485,17 @@ function startListening() {
   rec.onend = () => {
     finalText = finalText.trim();
     if (!finalText) {
+      vadStop();
       bubble.remove();
       if (state === "listening") setState("idle");
       return;
     }
     if (!t.speech_end) t.speech_end = Date.now();
     if (!t.transcript_final) t.transcript_final = Date.now();
+    if (vad.lastVoice && vad.lastVoice <= t.transcript_final) {
+      t.speech_end_vad = vad.lastVoice;
+    }
+    vadStop();
     bubble.textContent = finalText;
     sendTurn(finalText);
   };
@@ -616,12 +663,16 @@ function finishTurn(server) {
   if (t.posted) return;
   t.posted = true;
   const d = (a, b) => (t[a] != null && t[b] != null) ? Math.max(0, t[b] - t[a]) : null;
+  // Perceived-latency basis: true acoustic speech end (VAD), else the
+  // last interim transcript update, else Chrome's (late) speech_end stamp.
+  const t0 = t.speech_end_vad ?? t.last_interim ?? t.speech_end;
   const turn = {
     client: { ...t },
     server: server,
     derived: {
-      ttfa_ms: d("speech_end", "first_audio"),
-      stt_finalize_ms: d("speech_end", "transcript_final"),
+      ttfa_ms: (t.first_audio != null && t0 != null) ? Math.max(0, t.first_audio - t0) : null,
+      ttfa_basis: t.typed ? "typed" : (t.speech_end_vad ? "vad" : (t.last_interim ? "interim" : "finalize")),
+      endpoint_ms: (t.transcript_final != null && t0 != null) ? Math.max(0, t.transcript_final - t0) : null,
       send_to_first_byte_ms: d("request_sent", "first_byte"),
       stream_ms: d("first_byte", "stream_done"),
       tts_engine_ms: d("tts_start", "first_audio"),
@@ -652,13 +703,16 @@ function renderWaterfall(turn) {
   $("ttfa-num").textContent = Math.round(total);
   $("ttfa-mini").textContent = `ttfa ${Math.round(total)} ms`;
 
-  const t0 = t.speech_end;
+  const t0 = t.speech_end_vad ?? t.last_interim ?? t.speech_end;
   const stages = [
-    { lbl: "stt finalize",    cls: "stt",    from: t.speech_end,   to: t.transcript_final },
+    { lbl: "stt endpoint+final", cls: "stt",  from: t0,             to: t.transcript_final },
     { lbl: "send → 1st byte", cls: "net",    from: t.request_sent, to: t.first_byte },
     { lbl: "stream rest",     cls: "stream", from: t.first_byte,   to: t.stream_done },
     { lbl: "tts engine",      cls: "tts",    from: t.tts_start,    to: t.first_audio },
   ];
+  $("wf-note").textContent =
+    `speech-end basis: ${turn.derived.ttfa_basis} · client rows use the client clock, ` +
+    `server readout uses the server clock — never mixed. TTFA is measured entirely client-side.`;
   $("wf-rows").innerHTML = stages.map((s) => {
     if (s.from == null || s.to == null) return "";
     const ms = Math.max(0, s.to - s.from);

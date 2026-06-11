@@ -87,6 +87,19 @@ refreshes live when remember_fact fires mid-conversation, and lets the user
 delete any fact (visibility + control). Prioritized over a Postgres
 migration because it's evaluator-visible; internal tooling isn't.
 
+## True speech end via a parallel mic-energy VAD
+
+Chrome's `speechend` fires when the recognizer finalizes, not when the user
+stops talking, so the endpointing delay (the silence window before the final
+transcript) is invisible to the Web Speech API — the first waterfalls showed
+"stt finalize: 0 ms", which was the instrument lying. A ~40-line analyser on
+the raw mic stream records the last moment the signal exceeded the noise
+floor; that stamp is the basis for perceived time-to-first-audio. Fallback
+chain when the second mic capture fails: last interim-transcript update,
+then Chrome's stamp — and every metrics row records which basis was used
+(`ttfa_basis`), so baselines are never silently mixed. The same VAD is the
+natural foundation for barge-in later.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is

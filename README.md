@@ -58,8 +58,10 @@ argued in [DECISIONS.md](DECISIONS.md).
 ## Latency instrumentation
 
 Each turn captures a waterfall across both clocks — client
-(`t_speech_end`, `t_transcript_final`, `t_request_sent`, `t_first_byte`,
-`t_stream_done`, `t_tts_start`, `t_first_audio`) and server
+(`t_speech_end_vad` from a mic-energy VAD that catches the true acoustic
+speech end Chrome's events hide, `t_speech_end`, `t_transcript_final`,
+`t_request_sent`, `t_first_byte`, `t_stream_done`, `t_tts_start`,
+`t_first_audio`) and server
 (`t_request_received`, `t_llm_first_token`, per-tool start/end,
 `t_response_complete`). Client and server stamps are never subtracted across
 clocks; the headline **time-to-first-audio** is pure client-side, so it's
