@@ -4,7 +4,7 @@ import os
 import secrets
 import sqlite3
 import tempfile
-from collections import defaultdict, deque
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(timeout=10)
     app.state.oai = AsyncOpenAI()
     app.state.model = os.environ.get("SARJY_MODEL", "gpt-4.1-mini")
-    # Per-user session history, RAM only — long-term memory lives in SQLite.
-    app.state.history = defaultdict(lambda: deque(maxlen=20))
+    # Per-user, per-page-load conversation history, RAM only.
+    app.state.history = {}
     yield
     await app.state.http.aclose()
     app.state.conn.close()
@@ -43,12 +43,19 @@ app = FastAPI(title="Sarjy", lifespan=lifespan)
 async def chat(request: Request):
     body = await request.json()
     user_id = (body.get("user_id") or "anonymous").strip()
+    session_id = (body.get("session_id") or "").strip()
     message = (body.get("message") or "").strip()
     if not message:
         return JSONResponse({"error": "empty message"}, status_code=400)
 
     timings = {"t_request_received": llm.now_ms()}
     state = request.app.state
+    # A new page load sends a new session_id: the conversation resets, and
+    # the SQLite facts table is the only thing that crosses sessions.
+    entry = state.history.get(user_id)
+    if entry is None or entry["session"] != session_id:
+        entry = {"session": session_id, "messages": deque(maxlen=20)}
+        state.history[user_id] = entry
 
     async def gen():
         try:
@@ -58,7 +65,7 @@ async def chat(request: Request):
                 conn=state.conn,
                 model=state.model,
                 user_id=user_id,
-                history=state.history[user_id],
+                history=entry["messages"],
                 message=message,
                 timings=timings,
             )

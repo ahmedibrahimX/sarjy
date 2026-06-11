@@ -109,6 +109,24 @@ then Chrome's stamp — and every metrics row records which basis was used
 (`ttfa_basis`), so baselines are never silently mixed. The same VAD is the
 natural foundation for barge-in later.
 
+## Conversation history is session-scoped (per page load)
+
+History originally lived in RAM keyed by user id alone, so a page refresh
+kept the old transcript: deleting a fact looked broken (the model re-read
+the deleted info from the conversation), and "fresh session" demos weren't
+actually fresh. The client now sends a session_id generated per page load,
+and the server keeps only the latest session's messages per user. Refresh =
+clean conversation; the facts table is the only cross-session channel.
+
+## Guardrail: never guess personal facts
+
+Asked "what's my name?" with no name on file (but "Lives in Cairo" in
+context), the model confabulated a plausible name — and happened to be
+right, which made it look exactly like a memory leak until the database
+proved otherwise. One system-prompt line fixes it: only state personal
+facts present in memory or the conversation, otherwise say you don't know.
+Empty memory must produce "I don't know", not a guess.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is

@@ -367,6 +367,10 @@ const userId = (() => {
   return id;
 })();
 
+/* a fresh conversation per page load — only stored facts cross sessions */
+const sessionId = (crypto.randomUUID && crypto.randomUUID()) ||
+  "s-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+
 /* ── state machine: idle | listening | thinking | speaking ── */
 let state = "idle";
 function setState(next, label) {
@@ -585,6 +589,7 @@ async function sendTurn(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         user_id: userId,
+        session_id: sessionId,
         message: text,
         client_timestamps: {
           t_speech_end: t.speech_end,
