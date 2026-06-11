@@ -1,0 +1,17 @@
+[project]
+name = "sarjy"
+version = "0.1.0"
+description = "Sarjy — a voice assistant (Sarj.ai take-home)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "openai",
+    "httpx",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
