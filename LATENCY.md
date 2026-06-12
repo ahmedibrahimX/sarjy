@@ -211,8 +211,28 @@ flipped per step):
 - full_stream_done wobble across runs (1978/2263/1963) is reply-length
   noise; no mechanism, no claim.
 
-Human validation: (pending — spoken weather turns; perceived vs actual
-land in the dashboard feed)
+**Human validation (spoken weather turns, ack+cache on, warm p50):**
+
+| | hold (n=4) | tap (n=4) |
+| --- | --- | --- |
+| TTFA perceived | 1021 | 2474 |
+| TTFA actual | 2605 | 4057 |
+| endpointing | 128 | 1410 |
+| tool | 589 | 590 |
+
+- **Tool-turn perceived target (< 2 s p50): PASSED in hold mode at
+  1021 ms** — audio starts about a second after the spacebar releases.
+- Actual improved too: hold weather 3265 to 2605 vs baseline (pipelining
+  ~180 plus cache ~600 compounding); the cache's halving of tool time
+  reproduces in human turns (~1230 to ~590 ms).
+- Tap misses the perceived target at 2474 ms, and the decomposition says
+  why: 1410 ms is endpointing — Attack 3's territory.
+- The tap set also caught a 10.3 s outlier turn: server TTFT of 6769 ms,
+  every other stage normal — an OpenAI first-token stall. The ack cannot
+  hide it (the stall precedes the first byte the ack rides on).
+  Mitigations (first-token timeout-and-retry, speculative filler) go in
+  the next-week list; the turn stays in the data as what provider tails
+  look like.
 
 ### Attack 3 — endpointing threshold, tap mode only (OPT_VAD_ENDPOINT)
 
