@@ -290,8 +290,51 @@ motivation data for Attack 4's keep-alive and pre-warm.
 
 ### Attack 4 — cold start: keep-alive (OPT_KEEPALIVE), pre-warm (OPT_PREWARM), prefix caching
 
-(pending — prefix-cache experiment pre-registered as a likely null result:
-prompt is ~300 tokens, OpenAI automatic caching starts at ~1k)
+**Cold TTFT, bench runs 5-9 (short no-tool, N=5 each, 65 s idle before
+every turn), ms:**
+
+| arm | run | TTFT p50 | TTFT p95 |
+| --- | --- | --- | --- |
+| cold baseline | 5 | 693 | 1473 |
+| keepalive, GET ping (pool broken) | 7 | 579 | 1719 |
+| keepalive, GET ping (pool fixed) | 8 | 642 | 827 |
+| pre-warm (1-token completion at load) | 6 | **473** | 815 |
+| keepalive, 1-token completion ping | 9 | **494** | 6178* |
+
+*one provider first-token stall landed in run 9 — the same orthogonal tail
+class observed at 6.8 s and 28 s; no client-side warming prevents it.
+
+**The falsification arc, in order:**
+
+1. GET-ping keepalive did nothing (run 7 vs 5). Root cause: httpx expires
+   idle pooled connections after 5 s by default (`keepalive_expiry`), so a
+   45 s ping can never keep a connection alive. A correct technique
+   defeated by an unread library default.
+2. Pool fixed (`keepalive_expiry=75`): the tail collapsed (p95 1473 to
+   827 — connection-setup spikes gone) but the median barely moved.
+   Conclusion forced by the data: **warmth is a serving-path property, not
+   a connection property** — the median cold cost lives on the provider's
+   side and only a real completion refreshes it.
+3. Ping replaced with a 1-token completion: cold-labeled turns hit
+   warm-level medians (494 vs warm ~470). Cost: ~1 token per 45 s,
+   roughly 2k tokens/day — fractions of a cent.
+
+**Pre-warm** (page-load `POST /warmup`, one 1-token completion) covers the
+fresh-arrival case: the warmup call absorbs the cold cost (~1.8 s measured)
+inside the dead time between page load and first utterance. Both flags
+shipped on; they cover complementary idle patterns.
+
+**Prefix caching: null by precondition, as pre-registered.** The prompt was
+already ordered stable-first (system text, then memory facts, volatile
+content last), but OpenAI's automatic prompt caching activates at ~1024+
+prompt tokens and Sarjy's prompt is ~300. There is nothing to measure
+until the prompt grows 3x; recorded as a non-experiment rather than padded
+into a fake one.
+
+**Honesty note on cold depth:** these arms measure 65-second cold. The
+12-28 s stalls arrived after 2.5 hours idle — a deeper cold (and possibly
+a different mechanism) that is uneconomical to sample at N=5. The claim is
+scoped to the common case.
 
 ### Attack 5 (stretch) — model TTFT A/B through the provider seam
 

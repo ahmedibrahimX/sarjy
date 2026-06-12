@@ -188,6 +188,20 @@ the presentation, and hold-to-talk remains the zero-risk path for
 deliberate speakers. With more time: learn a per-user pause profile
 instead of one global number.
 
+## Attack 4: warmth is a serving-path property, not a connection property
+
+GET pings could not fix the cold median: first because httpx silently
+expires idle pooled connections after 5 s (runs 5 vs 7 — the fix is
+`keepalive_expiry` outliving the ping interval), and then, with the pool
+fixed, because warm connections only compress the tail (run 8). The
+median cold cost lives in the provider's serving path, and only a real
+completion refreshes it. So both shipped warmers are 1-token completions:
+pre-warm at page load (covers fresh arrivals, hides the cold cost in the
+load-to-first-utterance dead time) and keepalive every 45 s (covers
+ongoing idleness, ~2k tokens/day). Provider first-token stalls (6-28 s,
+observed three times) are orthogonal to warming; their mitigation —
+first-token timeout and retry — is deferred, not forgotten.
+
 ## Rigor budget: verification went where the risk was
 
 This project was not built test-first, and that was a decision rather than
