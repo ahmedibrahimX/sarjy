@@ -165,7 +165,9 @@ function renderFeed() {
   const max = Math.max(...turns.map((t) => ttfaOf(t) || 0), 1);
   $("feed").innerHTML = turns.map((t) => {
     const ttfa = ttfaOf(t);
-    const perceived = perceivedOf(t);
+    // the prominent number is what the user FELT; actual rides as sub-label
+    const felt = perceivedOf(t) ?? ttfa;
+    const differs = ttfa != null && felt != null && Math.round(felt) !== Math.round(ttfa);
     const cfg = t.config || {};
     const warmth = t.turn?.server?.warmth || "?";
     const badges = [
@@ -180,8 +182,8 @@ function renderFeed() {
     return `<div class="turn" data-id="${t.id}">
       <div class="meta"><span class="time">${(t.created_at || "").slice(5, 19)}</span><div class="badges">${badges}</div></div>
       <div style="width:${trackWidth}%">${ttfa ? WF.barHtml(t.turn, ttfa) : ""}</div>
-      <div class="ttfa"><span class="n">${ttfa != null ? Math.round(ttfa) + " ms" : "—"}</span>
-        ${perceived != null && perceived !== ttfa ? `<span class="p">perceived ${Math.round(perceived)}</span>` : ""}</div>
+      <div class="ttfa"><span class="n">${felt != null ? Math.round(felt) + " ms" : "—"}</span>
+        ${differs ? `<span class="p">actual ${Math.round(ttfa)}</span>` : ""}</div>
       ${detail}
     </div>`;
   }).join("");
