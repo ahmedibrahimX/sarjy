@@ -234,6 +234,7 @@
   }
   .ttfa-big .num { font-size: 2rem; font-weight: 500; color: var(--amber); }
   .ttfa-big .label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
+  .ttfa-big .perceived { font-size: .75rem; color: var(--green); }
 
   .wf { display: flex; flex-direction: column; gap: 6px; }
   .wf-row { display: grid; grid-template-columns: 150px 1fr 64px; gap: 10px; align-items: center; font-size: .72rem; }
@@ -328,6 +329,7 @@
         <div class="ttfa-big">
           <span class="num" id="ttfa-num">—</span>
           <span class="label">ms · time to first audio</span>
+          <span class="perceived" id="ttfa-perceived"></span>
         </div>
         <div class="wf" id="wf-rows"></div>
         <div class="wf-server" id="wf-server"></div>
@@ -883,6 +885,9 @@ function renderWaterfall(turn) {
   $("wf-content").style.display = "block";
   $("ttfa-num").textContent = Math.round(total);
   $("ttfa-mini").textContent = `ttfa ${Math.round(total)} ms`;
+  const perceived = turn.derived.ttfa_perceived_ms;
+  $("ttfa-perceived").textContent =
+    (perceived != null && perceived < total - 50) ? `perceived ${Math.round(perceived)} ms` : "";
 
   $("wf-note").textContent =
     `speech-end basis: ${turn.derived.ttfa_basis} · input: ${t.input_mode || "tap"} · ` +
