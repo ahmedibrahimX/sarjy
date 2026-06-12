@@ -60,8 +60,30 @@ from the deployed instance.
 
 ### Deployed (the headline baseline)
 
-(to be filled by `bench --name baseline-prod` after the Phase 2 deploy,
-before any flag is enabled)
+`baseline-prod`, bench_run id=1 (prod DB), N=10, synthetic hold mode, all
+flags off, ms:
+
+| stage | short p50 | short p95 | long p50 | long p95 | weather p50 | weather p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| send to first byte | 705 | 2205 | 630 | 1312 | 759 | 919 |
+| server TTFT | 453 | 1405 | 380 | 1038 | 454 | 614 |
+| server tools | 0 | 0 | 0 | 0 | 309 | 2140 |
+| server total | 647 | 1510 | 936 | 1435 | 1714 | 3376 |
+| first sentence ready | 756 | 2409 | 835 | 1442 | 1711 | 3456 |
+| full stream done | 922 | 2409 | 1183 | 1688 | 1978 | 3664 |
+
+Reads:
+- Audio-ready floor without pipelining (hold mode, plus ~10 ms TTS):
+  ~0.9 s short / ~1.2 s long / ~2.0 s weather at p50. The warm no-tool
+  target (<1.5 s actual) looks reachable; the tool-turn perceived target
+  rides on Attack 2's acknowledgments.
+- Pipelining gap (full stream vs first sentence): ~350 ms p50 on long
+  answers, ~270 ms on weather turns.
+- Weather tool: p50 309 ms but p95 2140 ms from Railway — heavy tail
+  (likely connection setup to Open-Meteo); the geocode cache and a shared
+  keep-alive pool should compress it.
+- Warm TTFT from Railway (380-455 ms p50) beats local (~500-650 ms) —
+  Railway sits closer to OpenAI than a Cairo ISP does.
 
 ### In-browser client stages (manual protocol)
 
