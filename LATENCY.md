@@ -236,7 +236,57 @@ flipped per step):
 
 ### Attack 3 — endpointing threshold, tap mode only (OPT_VAD_ENDPOINT)
 
-(pending — tradeoff curve at three thresholds, hold turns as control)
+**Mechanism:** our mic-energy VAD force-stops recognition after N ms of
+measured silence instead of waiting out Chrome's endpointer, guarded by
+250 ms of interim-transcript stability. Tap mode only; hold turns
+(explicit release, ~130 ms) are the control group and the escape hatch.
+
+**The curve (endpoint stage p50, human tap turns, artifacts excluded):**
+
+| setting | endpoint p50 | vs native |
+| --- | --- | --- |
+| native Chrome | ~1430 ms | — |
+| 600 ms | ~940 ms | -490 |
+| 400 ms | ~503 ms | -930 |
+| 300 ms | ~590 ms | no better than 400 |
+
+**Gains are linear down to 400 ms, then floor.** Below 400 the binding
+constraints are the interim-stability guard plus Chrome's finalize cost
+(~400-500 ms combined) — you cannot endpoint faster than the recognizer
+produces stable transcript. 300 buys risk for zero reward.
+
+**Clipping is deterministic, not probabilistic: the threshold IS the
+maximum mid-sentence thinking pause.** Controlled pause tests (silent
+pause immediately before the final word, so a clip is unambiguous):
+
+| setting | pause ~1 s | pause ~0.5 s |
+| --- | --- | --- |
+| 600 ms | clipped 3/3 (1 s > 600 ms, by definition) | survived ~3/4 |
+| 400 ms | (redundant — clips by the same arithmetic) | clipped 3/3 |
+
+The 600/0.5 s miss came from natural pause-length variance, not the
+mechanism. Natural fluent phrases at 400 almost never clipped (1 of ~11),
+so the threshold choice is a persona decision: 400 for decisive speech,
+600 as the humane default for hesitant first-time users, hold mode for
+deliberate thinkers. **Shipped default: 600** (demo users hesitate).
+
+**Effect on TTFA:** healthy warm tap no-tool turns reached ~1.4-1.8 s at
+the 400 setting (median ~1.5-1.6 s, grazing the actual target) and
+~1.9-2.2 s at 600 — versus 2522 ms with native endpointing.
+
+**Measurement honesty, artifacts observed and excluded:** trailing noise
+near finalize compresses the endpoint stage to absurd lows (1/17/66/92/103
+ms turns — sound resets the VAD's last-voice stamp); recognition start-up
+clips first syllables when speech begins immediately after the tap (the
+hold-mode disease appearing in tap; ready-cue idea in IDEAS.md); one turn
+where Chrome finalized before our threshold fired; and one ASR mishear
+("coffee" -> "cough") that produced a confident answer about coughing —
+a reminder that latency is not the only axis of voice-turn quality.
+
+**Bonus capture:** the 600-setting batch caught a cluster of OpenAI
+first-token stalls right after ~2.5 h of idle — TTFT of 28.3 s, 12.2 s,
+12.8 s on consecutive turns, every other stage normal. Strongest possible
+motivation data for Attack 4's keep-alive and pre-warm.
 
 ### Attack 4 — cold start: keep-alive (OPT_KEEPALIVE), pre-warm (OPT_PREWARM), prefix caching
 

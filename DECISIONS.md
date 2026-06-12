@@ -174,6 +174,20 @@ make a latency number look better is the hallucination failure mode with
 extra steps. Measured: tool p50 halved; the p95 tail stayed, because it
 belongs to the forecast call's connection setup (Attack 4's problem).
 
+## Attack 3: the endpointing threshold is a product decision, shipped at 600
+
+The threshold is exactly the maximum mid-sentence thinking pause — clipping
+is deterministic arithmetic, not bad luck — and the measured floor (the
+interim-stability guard plus Chrome's finalize, ~400-500 ms) means nothing
+below 400 pays. 400 is ~930 ms faster than Chrome's endpointer and fine
+for fluent speech, but controlled tests clipped every intended
+half-second pause at it. The deployed default is 600: a public demo's
+users are hesitant first-timers, and answering 350 ms later beats cutting
+someone off mid-thought. The console slider keeps 400 one drag away for
+the presentation, and hold-to-talk remains the zero-risk path for
+deliberate speakers. With more time: learn a per-user pause profile
+instead of one global number.
+
 ## Rigor budget: verification went where the risk was
 
 This project was not built test-first, and that was a decision rather than
