@@ -526,7 +526,11 @@ let pressStartedListening = false;
 
 function pressDown() {
   if (!SR || state === "thinking") return;
-  if (state === "speaking") { speechSynthesis.cancel(); setState("idle"); }
+  if (state === "speaking") {
+    currentTurnAbort?.abort(); // pipelined turns may still be streaming
+    speechSynthesis.cancel();
+    setState("idle");
+  }
   holdActive = true;
   if (state === "listening") { pressStartedListening = false; return; } // tap-to-stop on release
   pressT0 = Date.now();
@@ -584,6 +588,8 @@ $("type-form").addEventListener("submit", (e) => {
 });
 
 /* ── one turn: POST /chat, read SSE stream ──────────── */
+let currentTurnAbort = null;
+
 async function sendTurn(text) {
   setState("thinking");
   const reply = addBubble("sarjy", "");
@@ -591,10 +597,87 @@ async function sendTurn(text) {
   t.request_sent = Date.now();
   let full = "";
   let server = null;
+  const aborter = new AbortController();
+  currentTurnAbort = aborter;
+
+  /* sentence pipelining (OPT_SENTENCE_PIPELINING): speak sentence 1 the
+     moment its boundary arrives, queue later sentences as they complete —
+     speechSynthesis queues utterances natively. */
+  const pipelined = CFG.flags?.OPT_SENTENCE_PIPELINING === true;
+  let spokenChars = 0;
+  let pendingUtterances = 0;
+  let streamComplete = false;
+
+  const maybeFinish = () => {
+    if (t.first_audio != null && streamComplete) finishTurn(server);
+  };
+
+  const settle = (e) => {
+    pendingUtterances--;
+    if (pendingUtterances === 0 && streamComplete && state === "speaking") setState("idle");
+    const canceled = e && (e.error === "canceled" || e.error === "interrupted");
+    if (e && e.type === "error" && !canceled && t.first_audio == null && streamComplete) {
+      finishTurn(server); // audio failed outright; keep the turn's metrics
+    }
+  };
+
+  const enqueueSpeech = (chunk) => {
+    chunk = chunk.trim();
+    if (!chunk || aborter.signal.aborted) return;
+    const u = new SpeechSynthesisUtterance(chunk);
+    pendingUtterances++;
+    if (t.tts_enqueue_first == null) {
+      t.tts_enqueue_first = Date.now();
+      u.onstart = () => {
+        t.first_audio = Date.now();
+        t.first_audio_content = t.first_audio;
+        setState("speaking");
+        maybeFinish();
+      };
+    }
+    u.onend = settle;
+    u.onerror = settle;
+    speechSynthesis.speak(u);
+  };
+
+  // Sentence boundary: terminal punctuation followed by whitespace or end.
+  // The lookahead keeps decimals ("3.5") intact; the minimum first-flush
+  // length avoids speaking a clipped fragment like an abbreviation's dot.
+  const findCut = (buf, isFirst) => {
+    const re = /[.!?؟](?=\s|$)/g;
+    let m;
+    while ((m = re.exec(buf)) !== null) {
+      const cut = m.index + 1;
+      if (isFirst && cut < 12) continue;
+      return cut;
+    }
+    return -1;
+  };
+
+  const flushSentences = (final) => {
+    for (;;) {
+      const pending = full.slice(spokenChars);
+      const cut = findCut(pending, spokenChars === 0);
+      if (cut < 0) break;
+      if (t.first_sentence_complete == null) t.first_sentence_complete = Date.now();
+      enqueueSpeech(pending.slice(0, cut));
+      spokenChars += cut;
+    }
+    if (final) {
+      const rest = full.slice(spokenChars).trim();
+      if (rest) {
+        if (t.first_sentence_complete == null) t.first_sentence_complete = Date.now();
+        enqueueSpeech(rest);
+      }
+      spokenChars = full.length;
+    }
+  };
+
   try {
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: aborter.signal,
       body: JSON.stringify({
         user_id: userId,
         session_id: sessionId,
@@ -626,6 +709,7 @@ async function sendTurn(text) {
             full += ev.text;
             reply.textContent = full;
             scrollDown();
+            if (pipelined) flushSentences(false);
           } else if (ev.type === "tool") {
             if (ev.status === "start") {
               setState("thinking", ev.name === "get_weather" ? "checking weather…" : "saving a memory…");
@@ -647,9 +731,21 @@ async function sendTurn(text) {
       setState("idle");
       return;
     }
-    speak(full, server);
+    if (pipelined) {
+      streamComplete = true;
+      flushSentences(true);
+      maybeFinish();
+      if (pendingUtterances === 0 && state !== "speaking") setState("idle");
+    } else {
+      speak(full, server);
+    }
   } catch (err) {
     reply.classList.remove("streaming");
+    if (err.name === "AbortError") {
+      // barge-in: the user started a new turn mid-stream
+      if (!reply.textContent) reply.remove();
+      return;
+    }
     reply.classList.add("error");
     reply.textContent = err.message;
     setState("idle");
@@ -733,7 +829,8 @@ function finishTurn(server) {
     client: { ...t, endpoint_threshold_ms: CFG.flags?.OPT_VAD_ENDPOINT ? CFG.endpoint_threshold_ms : null },
     server: server,
     derived: {
-      ttfa_ms: (t.first_audio != null && t0 != null) ? Math.max(0, t.first_audio - t0) : null,
+      ttfa_ms: ((t.first_audio_content ?? t.first_audio) != null && t0 != null) ? Math.max(0, (t.first_audio_content ?? t.first_audio) - t0) : null,
+      ttfa_perceived_ms: ((t.first_audio_any ?? t.first_audio) != null && t0 != null) ? Math.max(0, (t.first_audio_any ?? t.first_audio) - t0) : null,
       ttfa_basis: t.typed ? "typed" : (t.release ? "release" : (t.speech_end_vad ? "vad" : (t.last_interim ? "interim" : "finalize"))),
       endpoint_ms: (t.transcript_final != null && t0 != null) ? Math.max(0, t.transcript_final - t0) : null,
       send_to_first_byte_ms: d("request_sent", "first_byte"),
