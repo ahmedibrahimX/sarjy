@@ -141,6 +141,31 @@ plus one polling page is the right size — no websockets, no Grafana, one
 CDN chart library. The waterfall renderer is shared with the debug console
 (static/waterfall.js): one stage model, two presentations.
 
+## Two instruments: headless bench plus human protocol
+
+The bench harness (app/bench.py) drives the real /chat endpoint with fixed
+prompts, N repetitions, and controlled cadence — and is blind to TTFA,
+endpointing, and TTS (no microphone, no audio). The human protocol measures
+exactly those, but every spoken sample carries mic, room, and phrasing
+variance, and costs minutes per condition. They are complements with
+disjoint blind spots: server-side attacks (geocode cache, keep-alive,
+model A/B) take their primary evidence from the bench; client-side attacks
+(pipelining, acknowledgments, endpointing) from human turns, with the bench
+as the control proving the server didn't move. Results live in separate
+tables (bench_run vs metrics) so neither contaminates the other, and
+re-benching after every attack is the tripwire for unintended server-side
+regressions, not just the scoreboard for intended wins.
+
+Attack 1 is the worked example. The bench diff (run 1 vs run 2) shows
+deltas of +10, -67, and +114 ms scattered in both directions across stages
+the client-side flag cannot causally touch: run-to-run noise from
+nondeterministic reply lengths, provider load, and Open-Meteo's tail. The
+standard cuts both ways — the -67 ms TTFT "improvement" is dismissed along
+with the +114 ms "regression". The only claim that survives is the one
+with a mechanism (first audio stops waiting for the stream tail), measured
+on human turns: -387 ms tap / -127 ms hold at p50, with endpointing
+unchanged (1423 vs 1427 ms) as the attribution control.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is
