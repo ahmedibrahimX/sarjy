@@ -414,21 +414,40 @@ zero stalls, all-warm paths, and tool times within a 4 ms spread.
 
 (Chart built from the measured p50s above by `charts/build_charts.py`.)
 
-## Final bench: run 1 (all flags off) vs run 13 (all flags on)
+## Final bench: all flags off vs all flags on
 
-Same pipeline, same instrument, N=10 warm per turn type:
+The first attempt (runs 1 vs 13, taken 11 hours apart) became the closing
+methodology lesson instead of the headline: stages no flag touches showed
++16-22% "regressions". Reply lengths were identical (294 vs 293 chars p50
+on long turns), but provider throughput had dropped 40% between 04:40 and
+15:50 (614 to 367 chars/s) — time-of-day drift painting losses onto an
+unchanged pipeline. Benchmark pairs must share a time window; Attack 5's
+model sweep did this deliberately, and the headline pair was re-taken to
+match (the second leg also caught a Railway operational quirk: staged
+variable changes can restart the service more than once, so post-flip
+benches need a settle delay — the first attempt died on a mid-run 502).
 
-- **Weather tool: p50 309 to 148, p95 2140 to 149.** The cache halved the
-  median; the warm connection pool deleted the tail entirely — all ten
-  turns within 148-151 ms on a stage that used to swing by 2 seconds.
-- **ack_ready exists at 982 ms p50**: the perceived audio floor on tool
-  turns, a stage that had no value at baseline because nothing spoke
-  before the full reply.
-- **Warm TTFT statistically unchanged** (380-553 ms across types) —
-  correct by design: no attack claimed to speed up warm generation. The
-  wins were pipeline shape, tool cost, endpointing, and cold elimination.
-- **Zero cold turns in run 13** despite a fresh bench session — keepalive
-  doing its job invisibly.
+**The canonical same-hour pair: run 14 (all off) vs run 15 (all on),
+minutes apart, N=10 per turn type.** Weather turns, p50:
+
+| stage | all off | all on | delta |
+| --- | --- | --- | --- |
+| server tools | 310 | 148 | -52% (p95 1237 to 150) |
+| ack_ready (perceived audio floor) | — | 821 | new stage |
+| server total | 1980 | 1478 | -501 |
+| full stream done | 2254 | 1732 | -522 |
+
+- **No-tool turns: flat, in both directions** (largest deltas -69/+83 ms)
+  — correct by design. Those conditions' wins are client-side
+  (endpointing, pipelining) and live in the human tables above; the bench
+  proving the server didn't move is the attribution control, and the
+  fake regressions of the 11-hour pair are absent.
+- **Weather turns: every mechanism-bearing stage moved.** The cache halves
+  the tool and deletes its tail; warm serving compounds into about half a
+  second off totals; the acknowledgment defines a perceived floor at
+  ~820 ms from request start.
+- Run 13's observation stands: with keepalive on, a fresh bench session
+  produced zero cold turns.
 
 ## With another week
 
