@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sarjy — latency dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: #0e0f12; --surface: #16181d; --surface-2: #1c1f26; --line: #262a33;
+    --ink: #eae7de; --muted: #8d93a0;
+    --amber: #ffb454; --green: #6ee7a0; --blue: #7aa2f7; --red: #f7768e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "IBM Plex Mono", monospace; font-size: 13px;
+    padding: 24px; max-width: 1100px; margin-inline: auto;
+  }
+  h1 { font-size: 1.1rem; font-weight: 500; margin: 0 0 4px; }
+  h1 a { color: var(--amber); text-decoration: none; }
+  .sub { color: var(--muted); font-size: .75rem; margin-bottom: 24px; }
+  section {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px 18px; margin-bottom: 20px;
+  }
+  h2 { font-size: .8rem; font-weight: 500; color: var(--muted);
+       text-transform: uppercase; letter-spacing: .1em; margin: 0 0 12px; }
+  .empty { color: var(--muted); padding: 8px 0; }
+
+  /* turn feed */
+  .turn {
+    display: grid; grid-template-columns: 120px 1fr 90px; gap: 12px;
+    align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .turn:last-child { border-bottom: none; }
+  .turn .meta { display: flex; flex-direction: column; gap: 3px; }
+  .turn .time { color: var(--muted); font-size: .7rem; }
+  .badges { display: flex; gap: 4px; flex-wrap: wrap; }
+  .badge {
+    font-size: .62rem; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .badge.warm { border-color: var(--amber); color: var(--amber); }
+  .badge.cold { border-color: var(--blue); color: var(--blue); }
+  .badge.tool { border-color: var(--green); color: var(--green); }
+  .turn .ttfa { text-align: right; }
+  .turn .ttfa .n { color: var(--amber); }
+  .turn .ttfa .p { display: block; color: var(--muted); font-size: .65rem; }
+  .wf-track {
+    position: relative; height: 14px; background: var(--surface-2);
+    border-radius: 4px; overflow: hidden; display: block;
+  }
+  .wf-bar { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+  .wf-bar.stt    { background: var(--green); opacity: .85; }
+  .wf-bar.net    { background: var(--blue);  opacity: .85; }
+  .wf-bar.stream { background: var(--blue);  opacity: .5; }
+  .wf-bar.sent   { background: #b48ead;      opacity: .9; }
+  .wf-bar.tts    { background: var(--amber); opacity: .9; }
+  .turn-detail { grid-column: 1 / -1; padding: 6px 0 10px; }
+  .wf-row { display: grid; grid-template-columns: 150px 1fr 64px; gap: 10px;
+            align-items: center; font-size: .72rem; margin-bottom: 5px; }
+  .wf-row .lbl { color: var(--muted); text-align: right; }
+  .legend { display: flex; gap: 14px; margin-top: 10px; font-size: .65rem; color: var(--muted); }
+  .legend span::before { content: "■ "; }
+  .legend .l-stt::before { color: var(--green); }
+  .legend .l-net::before { color: var(--blue); }
+  .legend .l-stream::before { color: var(--blue); opacity: .5; }
+  .legend .l-sent::before { color: #b48ead; }
+  .legend .l-tts::before { color: var(--amber); }
+
+  /* bench compare */
+  .pickers { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  select, button {
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 6px 10px; font-family: inherit; font-size: .75rem;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: .72rem; }
+  th, td { text-align: right; padding: 4px 10px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; color: var(--muted); }
+  th { color: var(--muted); font-weight: 400; }
+  td.better { color: var(--green); }
+  td.worse { color: var(--red); }
+  .cfg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 14px; }
+  .cfg .badge.diff { border-color: var(--amber); color: var(--amber); }
+  .ttype { color: var(--ink); font-size: .78rem; margin: 14px 0 6px; }
+
+  /* slicer */
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  .filters label { color: var(--muted); font-size: .68rem; }
+  .stats { color: var(--muted); font-size: .75rem; margin-top: 8px; }
+  .stats b { color: var(--amber); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<h1>Sarjy — latency dashboard <a href="/">(back to Sarjy)</a></h1>
+<div class="sub">public · timings, labels and config only — no conversation content · polls every 2.5 s</div>
+
+<section>
+  <h2>live turn feed (last 20)</h2>
+  <div id="feed"><div class="empty">No turns yet — talk to Sarjy in another tab.</div></div>
+  <div class="legend">
+    <span class="l-stt">endpoint+stt</span><span class="l-net">send→1st byte</span>
+    <span class="l-stream">stream</span><span class="l-sent">first sentence</span>
+    <span class="l-tts">tts</span>
+  </div>
+</section>
+
+<section>
+  <h2>bench run comparison</h2>
+  <div class="pickers">
+    <select id="run-a"></select>
+    <select id="run-b"></select>
+  </div>
+  <div id="compare"><div class="empty">Pick two stored bench runs.</div></div>
+</section>
+
+<section>
+  <h2>ttfa distribution slicer</h2>
+  <div class="filters" id="filters"></div>
+  <canvas id="hist" height="90"></canvas>
+  <div class="stats" id="stats"></div>
+</section>
+
+<script src="/waterfall.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+let allTurns = [];
+let expanded = new Set();
+
+/* ── live feed + slicer data ────────────────────────── */
+async function pollTurns() {
+  try {
+    const res = await fetch("/api/turns?limit=500");
+    allTurns = (await res.json()).turns || [];
+    renderFeed();
+    renderSlicer();
+  } catch { /* transient poll failures are fine */ }
+}
+
+function ttfaOf(t) { return t.turn?.derived?.ttfa_ms ?? null; }
+function perceivedOf(t) { return t.turn?.derived?.ttfa_perceived_ms ?? null; }
+function isTool(t) { return ((t.turn?.server?.tools) || []).length > 0; }
+
+function renderFeed() {
+  const turns = allTurns.slice(0, 20);
+  if (!turns.length) {
+    $("feed").innerHTML = '<div class="empty">No turns yet — talk to Sarjy in another tab.</div>';
+    return;
+  }
+  const max = Math.max(...turns.map((t) => ttfaOf(t) || 0), 1);
+  $("feed").innerHTML = turns.map((t) => {
+    const ttfa = ttfaOf(t);
+    const perceived = perceivedOf(t);
+    const cfg = t.config || {};
+    const warmth = t.turn?.server?.warmth || "?";
+    const badges = [
+      `<span class="badge">${cfg.input_mode || "?"}</span>`,
+      `<span class="badge ${warmth}">${warmth}</span>`,
+      `<span class="badge ${isTool(t) ? "tool" : ""}">${isTool(t) ? "tool" : "no-tool"}</span>`,
+      `<span class="badge">${t.turn?.derived?.ttfa_basis || "?"}</span>`,
+    ].join("");
+    const trackWidth = ttfa ? Math.max(8, (ttfa / max) * 100) : 8;
+    const detail = expanded.has(t.id)
+      ? `<div class="turn-detail">${WF.rowsHtml(t.turn, ttfa)}</div>` : "";
+    return `<div class="turn" data-id="${t.id}">
+      <div class="meta"><span class="time">${(t.created_at || "").slice(5, 19)}</span><div class="badges">${badges}</div></div>
+      <div style="width:${trackWidth}%">${ttfa ? WF.barHtml(t.turn, ttfa) : ""}</div>
+      <div class="ttfa"><span class="n">${ttfa != null ? Math.round(ttfa) + " ms" : "—"}</span>
+        ${perceived != null && perceived !== ttfa ? `<span class="p">perceived ${Math.round(perceived)}</span>` : ""}</div>
+      ${detail}
+    </div>`;
+  }).join("");
+  for (const el of document.querySelectorAll(".turn")) {
+    el.addEventListener("click", () => {
+      const id = Number(el.dataset.id);
+      expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+      renderFeed();
+    });
+  }
+}
+
+/* ── bench comparison ───────────────────────────────── */
+const STAGES = [
+  "send_to_first_byte_ms", "server_ttft_ms", "server_tools_ms",
+  "server_total_ms", "first_sentence_ready_ms", "full_stream_done_ms",
+];
+const runCache = {};
+
+async function loadRuns() {
+  try {
+    const runs = (await (await fetch("/api/bench_runs")).json()).runs || [];
+    for (const sel of [$("run-a"), $("run-b")]) {
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">— select run —</option>' + runs.map((r) =>
+        `<option value="${r.id}">#${r.id} ${r.name} (${(r.created_at || "").slice(0, 16)})</option>`).join("");
+      if (prev) sel.value = prev;
+    }
+  } catch { /* retry next cycle */ }
+}
+
+async function fetchRun(id) {
+  if (!runCache[id]) runCache[id] = await (await fetch(`/api/bench_runs/${id}`)).json();
+  return runCache[id];
+}
+
+function cfgBadges(cfg, other) {
+  return Object.entries(cfg).map(([k, v]) => {
+    const differs = other && JSON.stringify(other[k]) !== JSON.stringify(v);
+    return `<span class="badge ${differs ? "diff" : ""}">${k}=${v}</span>`;
+  }).join("");
+}
+
+async function compare() {
+  const a = $("run-a").value, b = $("run-b").value;
+  if (!a || !b) return;
+  const [ra, rb] = await Promise.all([fetchRun(a), fetchRun(b)]);
+  const ttypes = Object.keys(ra.results?.turn_types || {});
+  let html = `<div class="cfg">${cfgBadges(ra.config_snapshot, rb.config_snapshot)}</div>
+              <div class="cfg">${cfgBadges(rb.config_snapshot, ra.config_snapshot)}</div>`;
+  for (const tt of ttypes) {
+    const aggA = ra.results.turn_types[tt]?.agg, aggB = rb.results?.turn_types?.[tt]?.agg;
+    if (!aggA || !aggB) continue;
+    html += `<div class="ttype">${tt}</div>
+      <table><tr><th>stage</th><th>A p50</th><th>B p50</th><th>Δ ms</th><th>Δ %</th><th>A p95</th><th>B p95</th></tr>` +
+      STAGES.map((s) => {
+        const pa = aggA[s]?.p50, pb = aggB[s]?.p50;
+        if (pa == null || pb == null) return "";
+        const d = pb - pa;
+        const pct = pa ? (d / pa) * 100 : 0;
+        const cls = d < 0 ? "better" : (d > 0 ? "worse" : "");
+        return `<tr><td>${s}</td><td>${Math.round(pa)}</td><td>${Math.round(pb)}</td>
+          <td class="${cls}">${d > 0 ? "+" : ""}${Math.round(d)}</td>
+          <td class="${cls}">${pct > 0 ? "+" : ""}${pct.toFixed(0)}%</td>
+          <td>${Math.round(aggA[s]?.p95 ?? 0)}</td><td>${Math.round(aggB[s]?.p95 ?? 0)}</td></tr>`;
+      }).join("") + "</table>";
+  }
+  $("compare").innerHTML = html || '<div class="empty">No comparable turn types.</div>';
+}
+$("run-a").addEventListener("change", compare);
+$("run-b").addEventListener("change", compare);
+
+/* ── distribution slicer ────────────────────────────── */
+const FIXED_FILTERS = {
+  input_mode: ["all", "tap", "hold", "typed"],
+  warmth: ["all", "warm", "cold"],
+  tool: ["all", "tool", "no-tool"],
+};
+let chart = null;
+
+function flagNames() {
+  const names = new Set();
+  for (const t of allTurns) {
+    for (const k of Object.keys(t.config || {})) if (k.startsWith("OPT_")) names.add(k);
+  }
+  return [...names].sort();
+}
+
+function buildFilters() {
+  const existing = new Set([...document.querySelectorAll("#filters select")].map((s) => s.dataset.key));
+  const wanted = [...Object.keys(FIXED_FILTERS), ...flagNames()];
+  if (wanted.every((k) => existing.has(k))) return;
+  $("filters").innerHTML = wanted.map((key) => {
+    const opts = FIXED_FILTERS[key] || ["all", "on", "off"];
+    return `<label>${key.replace("OPT_", "").toLowerCase()}
+      <select data-key="${key}">${opts.map((o) => `<option>${o}</option>`).join("")}</select></label>`;
+  }).join("");
+  for (const sel of document.querySelectorAll("#filters select")) {
+    sel.addEventListener("change", renderSlicer);
+  }
+}
+
+function pctl(values, p) {
+  const vals = [...values].sort((x, y) => x - y);
+  if (!vals.length) return null;
+  return vals[Math.min(vals.length - 1, Math.round((p / 100) * (vals.length - 1)))];
+}
+
+function renderSlicer() {
+  buildFilters();
+  const active = {};
+  for (const sel of document.querySelectorAll("#filters select")) {
+    if (sel.value !== "all") active[sel.dataset.key] = sel.value;
+  }
+  const filtered = allTurns.filter((t) => {
+    const cfg = t.config || {};
+    for (const [key, want] of Object.entries(active)) {
+      if (key === "warmth") { if ((t.turn?.server?.warmth || "?") !== want) return false; }
+      else if (key === "tool") { if ((isTool(t) ? "tool" : "no-tool") !== want) return false; }
+      else if (key === "input_mode") { if ((cfg.input_mode || "?") !== want) return false; }
+      else if ((cfg[key] === true ? "on" : "off") !== want) return false;
+    }
+    return ttfaOf(t) != null;
+  });
+  const values = filtered.map(ttfaOf);
+  const binSize = 250;
+  const maxV = Math.max(...values, 1);
+  const bins = Array.from({ length: Math.ceil(maxV / binSize) || 1 }, () => 0);
+  for (const v of values) bins[Math.min(bins.length - 1, Math.floor(v / binSize))]++;
+  const labels = bins.map((_, i) => `${(i * binSize / 1000).toFixed(2)}–${((i + 1) * binSize / 1000).toFixed(2)}s`);
+  if (!chart) {
+    chart = new Chart($("hist"), {
+      type: "bar",
+      data: { labels, datasets: [{ label: "turns", data: bins, backgroundColor: "#ffb454" }] },
+      options: { animation: false, plugins: { legend: { display: false } },
+        scales: { x: { ticks: { color: "#8d93a0" } }, y: { ticks: { color: "#8d93a0", precision: 0 } } } },
+    });
+  } else {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = bins;
+    chart.update();
+  }
+  $("stats").innerHTML = values.length
+    ? `n=<b>${values.length}</b> · p50 <b>${Math.round(pctl(values, 50))} ms</b> · p95 <b>${Math.round(pctl(values, 95))} ms</b>`
+    : "no turns match the current slice";
+}
+
+/* ── boot ───────────────────────────────────────────── */
+pollTurns();
+loadRuns();
+setInterval(pollTurns, 2500);
+setInterval(loadRuns, 10000);
+</script>
+</body>
+</html>

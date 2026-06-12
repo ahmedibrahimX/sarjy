@@ -127,6 +127,20 @@ proved otherwise. One system-prompt line fixes it: only state personal
 facts present in memory or the conversation, otherwise say you don't know.
 Empty memory must produce "I don't know", not a guess.
 
+## Companion latency dashboard, public, deliberately small
+
+A working analysis tool beats markdown tables: the dashboard reads the
+metrics and bench tables we already collect and renders the live turn feed,
+bench-run deltas, and sliceable TTFA distributions — every improvement
+attributable to a config_snapshot. It is public because the data is timings
+and labels only (no transcripts, no user ids displayed) and a shareable
+URL demos better than a screenshot; writes (bench storage, metrics purge)
+stay behind the admin token. Production would ship these same per-turn
+events to a real observability pipeline; for this project's scale, SQLite
+plus one polling page is the right size — no websockets, no Grafana, one
+CDN chart library. The waterfall renderer is shared with the debug console
+(static/waterfall.js): one stage model, two presentations.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is

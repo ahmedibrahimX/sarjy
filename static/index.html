@@ -244,6 +244,7 @@
   .wf-bar.stt    { background: var(--green); opacity: .85; }
   .wf-bar.net    { background: var(--blue);  opacity: .85; }
   .wf-bar.stream { background: var(--blue);  opacity: .5; }
+  .wf-bar.sent   { background: #b48ead;      opacity: .9; }
   .wf-bar.tts    { background: var(--amber); opacity: .9; }
   .wf-server {
     margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
@@ -351,6 +352,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="/waterfall.js"></script>
 <script>
 "use strict";
 
@@ -764,28 +766,11 @@ function renderWaterfall(turn) {
   $("ttfa-num").textContent = Math.round(total);
   $("ttfa-mini").textContent = `ttfa ${Math.round(total)} ms`;
 
-  const t0 = t.release ?? t.speech_end_vad ?? t.last_interim ?? t.speech_end;
-  const stages = [
-    { lbl: "stt endpoint+final", cls: "stt",  from: t0,             to: t.transcript_final },
-    { lbl: "send → 1st byte", cls: "net",    from: t.request_sent, to: t.first_byte },
-    { lbl: "stream rest",     cls: "stream", from: t.first_byte,   to: t.stream_done },
-    { lbl: "tts engine",      cls: "tts",    from: t.tts_start,    to: t.first_audio },
-  ];
   $("wf-note").textContent =
     `speech-end basis: ${turn.derived.ttfa_basis} · input: ${t.input_mode || "tap"} · ` +
     `client rows use the client clock, server readout uses the server clock — never mixed. ` +
     `TTFA is measured entirely client-side.`;
-  $("wf-rows").innerHTML = stages.map((s) => {
-    if (s.from == null || s.to == null) return "";
-    const ms = Math.max(0, s.to - s.from);
-    const left = Math.min(100, ((s.from - t0) / total) * 100);
-    const width = Math.max(0.5, Math.min(100 - left, (ms / total) * 100));
-    return `<div class="wf-row">
-      <span class="lbl">${s.lbl}</span>
-      <span class="wf-track"><span class="wf-bar ${s.cls}" style="left:${left}%;width:${width}%"></span></span>
-      <span class="ms">${Math.round(ms)} ms</span>
-    </div>`;
-  }).join("");
+  $("wf-rows").innerHTML = WF.rowsHtml({ client: t }, total);
 
   const server = turn.server;
   if (server) {

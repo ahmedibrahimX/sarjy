@@ -171,6 +171,31 @@ async def create_bench_run(request: Request):
     return {"id": run_id}
 
 
+@app.get("/dashboard")
+async def dashboard_page():
+    """Public latency dashboard — timings and config only, never content."""
+    return FileResponse(STATIC_DIR / "dashboard.html", media_type="text/html")
+
+
+@app.get("/api/turns")
+async def api_turns(request: Request, limit: int = 20):
+    limit = max(1, min(limit, 500))
+    return {"turns": metrics.recent_turns(request.app.state.conn, limit)}
+
+
+@app.get("/api/bench_runs")
+async def api_bench_runs(request: Request):
+    return {"runs": metrics.list_bench_runs(request.app.state.conn)}
+
+
+@app.get("/api/bench_runs/{run_id}")
+async def api_bench_run(request: Request, run_id: int):
+    run = metrics.get_bench_run(request.app.state.conn, run_id)
+    if run is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return run
+
+
 @app.get("/admin/db")
 async def export_db(request: Request):
     """Token-gated snapshot of the SQLite file, for offline metrics analysis."""
