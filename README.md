@@ -74,11 +74,28 @@ the `metrics` table for offline analysis.
 
 ## Configuration
 
-| Variable         | Default        | Purpose                          |
-| ---------------- | -------------- | -------------------------------- |
-| `OPENAI_API_KEY` | — (required)   | LLM access                       |
-| `SARJY_MODEL`    | `gpt-4.1-mini` | Chat model (swap for A/B tests)  |
-| `SARJY_DB`       | `sarjy.db`     | SQLite file path                 |
+| Variable          | Default        | Purpose                                      |
+| ----------------- | -------------- | -------------------------------------------- |
+| `OPENAI_API_KEY`  | — (required)   | LLM access                                   |
+| `SARJY_MODEL`     | `gpt-4.1-mini` | Chat model (A/B-tested in LATENCY.md; wins)  |
+| `SARJY_DB`        | `sarjy.db`     | SQLite file path                             |
+| `SARJY_ADMIN_TOKEN` | — (unset = disabled) | Enables `/admin/db` snapshot export, `/admin/metrics/clear`, `POST /bench_runs` |
+
+### Latency optimization flags (Phase 2 deep dive)
+
+Every optimization is behind a toggle so improvements are individually
+attributable and reverts are free. All six are ON in the deployed demo.
+The evidence for each lives in [LATENCY.md](LATENCY.md); the live data is
+on the public dashboard at `/dashboard`.
+
+| Flag | What it does |
+| --- | --- |
+| `OPT_SENTENCE_PIPELINING` | speak sentence one while the rest of the reply streams |
+| `OPT_TOOL_ACK` | spoken acknowledgment covers the tool round-trip (perceived TTFA) |
+| `OPT_GEOCODE_CACHE` | SQLite city-coordinates cache halves the weather tool |
+| `OPT_VAD_ENDPOINT` | our VAD endpoints tap-mode speech at `ENDPOINT_THRESHOLD_MS` (default 600; console slider) instead of Chrome's ~1.4 s |
+| `OPT_KEEPALIVE` | 1-token completion ping every 45 s keeps the serving path warm through idle |
+| `OPT_PREWARM` | page load fires one 1-token completion so the first turn is never cold |
 
 ## Deploy
 
