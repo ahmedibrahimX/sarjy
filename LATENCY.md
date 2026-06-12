@@ -414,7 +414,26 @@ zero stalls, all-warm paths, and tool times within a 4 ms spread.
 
 (Chart built from the measured p50s above by `charts/build_charts.py`.)
 
-## Final bench: all flags off vs all flags on
+## The wins, by instrument
+
+Five of the six optimizations act on the client or on perception, which a
+headless bench cannot see — so the scoreboard spans both instruments. One
+view of every win and the instrument that measured it:
+
+| win | metric (instrument) | before | after |
+| --- | --- | --- | --- |
+| tap endpointing | endpoint stage p50 (human) | ~1430 | 940 @600 / 503 @400 |
+| tool turns, perceived | TTFA perceived p50 (human) | — (nothing spoke early) | 1961 tap / 1021 hold |
+| no-tool TTFA, actual | p50 (human) | 2909 tap / 1356 hold | 2522 / 1229 |
+| weather tool cost | server tools p50 (bench) | 310 | 148, tail deleted |
+| weather server total | p50 (bench, same-hour) | 1980 | 1478 |
+| cold first token | TTFT p50 (bench) | 693 | 473 prewarm / 494 keepalive |
+
+The server bench below is the **control, not the scoreboard**: it verifies
+that the only server-side stages that moved are the ones with mechanisms,
+and that nothing regressed underneath the client-side wins.
+
+## Final bench: all flags off vs all flags on (server-side control)
 
 The first attempt (runs 1 vs 13, taken 11 hours apart) became the closing
 methodology lesson instead of the headline: stages no flag touches showed
