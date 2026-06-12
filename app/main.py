@@ -53,8 +53,15 @@ async def _keepalive(state) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.conn = db.connect()
-    app.state.http = httpx.AsyncClient(timeout=10)
-    app.state.oai = AsyncOpenAI()
+    # keepalive_expiry must outlive the keepalive ping interval (45 s):
+    # httpx drops idle pooled connections after 5 s by default, which
+    # silently defeated the first keepalive experiment (bench runs 5 vs 7).
+    limits = httpx.Limits(keepalive_expiry=75)
+    app.state.http = httpx.AsyncClient(timeout=10, limits=limits)
+    app.state.oai = AsyncOpenAI(
+        timeout=60,
+        http_client=httpx.AsyncClient(timeout=60, limits=limits),
+    )
     app.state.model = os.environ.get("SARJY_MODEL", "gpt-4.1-mini")
     # Per-user, per-page-load conversation history, RAM only.
     app.state.history = {}
@@ -64,6 +71,7 @@ async def lifespan(app: FastAPI):
     yield
     if keepalive_task:
         keepalive_task.cancel()
+    await app.state.oai.close()
     await app.state.http.aclose()
     app.state.conn.close()
 
@@ -112,7 +120,10 @@ async def chat(request: Request):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception:
             log.exception("turn failed")
-            error = {"type": "error", "message": "Sarjy hit an internal error on this turn."}
+            error = {
+                "type": "error",
+                "message": "Sarjy hit an internal error on this turn.",
+            }
             yield f"data: {json.dumps(error)}\n\n"
 
     return StreamingResponse(
@@ -168,7 +179,11 @@ async def post_metrics(request: Request):
     # other dimension; hold and tap distributions must never be mixed.
     snap["input_mode"] = client.get("input_mode") or "unknown"
     # One structured JSON line per turn, plus a SQLite row for later analysis.
-    log.info(json.dumps({"event": "turn_metrics", "user_id": user_id, "turn": turn, "config": snap}))
+    log.info(
+        json.dumps(
+            {"event": "turn_metrics", "user_id": user_id, "turn": turn, "config": snap}
+        )
+    )
     metrics.save_turn(request.app.state.conn, user_id, turn, snap)
     return {"ok": True}
 
