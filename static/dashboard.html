@@ -121,6 +121,14 @@
 
 <section>
   <h2>ttfa distribution slicer</h2>
+  <div class="filters">
+    <label>metric
+      <select id="metric-sel">
+        <option value="actual">ttfa (actual)</option>
+        <option value="perceived">ttfa (perceived)</option>
+      </select>
+    </label>
+  </div>
   <div class="filters" id="filters"></div>
   <canvas id="hist" height="90"></canvas>
   <div class="stats" id="stats"></div>
@@ -287,6 +295,10 @@ function pctl(values, p) {
 
 function renderSlicer() {
   buildFilters();
+  // perceived falls back to actual: they are identical on turns where no
+  // acknowledgment spoke before the content
+  const metric = $("metric-sel").value;
+  const valueOf = (t) => (metric === "perceived" ? (perceivedOf(t) ?? ttfaOf(t)) : ttfaOf(t));
   const active = {};
   for (const sel of document.querySelectorAll("#filters select")) {
     if (sel.value !== "all") active[sel.dataset.key] = sel.value;
@@ -299,9 +311,9 @@ function renderSlicer() {
       else if (key === "input_mode") { if ((cfg.input_mode || "?") !== want) return false; }
       else if ((cfg[key] === true ? "on" : "off") !== want) return false;
     }
-    return ttfaOf(t) != null;
+    return valueOf(t) != null;
   });
-  const values = filtered.map(ttfaOf);
+  const values = filtered.map(valueOf);
   const binSize = 250;
   const maxV = Math.max(...values, 1);
   const bins = Array.from({ length: Math.ceil(maxV / binSize) || 1 }, () => 0);
@@ -320,9 +332,10 @@ function renderSlicer() {
     chart.update();
   }
   $("stats").innerHTML = values.length
-    ? `n=<b>${values.length}</b> · p50 <b>${Math.round(pctl(values, 50))} ms</b> · p95 <b>${Math.round(pctl(values, 95))} ms</b>`
+    ? `n=<b>${values.length}</b> · ${metric} p50 <b>${Math.round(pctl(values, 50))} ms</b> · p95 <b>${Math.round(pctl(values, 95))} ms</b>`
     : "no turns match the current slice";
 }
+$("metric-sel").addEventListener("change", renderSlicer);
 
 /* ── boot ───────────────────────────────────────────── */
 pollTurns();
