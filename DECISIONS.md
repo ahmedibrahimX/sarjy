@@ -141,6 +141,22 @@ plus one polling page is the right size — no websockets, no Grafana, one
 CDN chart library. The waterfall renderer is shared with the debug console
 (static/waterfall.js): one stage model, two presentations.
 
+## Attack 1: sentence chunking into browser TTS, not a streaming TTS provider
+
+The pipeline's shape was the problem, not the synthesizer: browser TTS
+starts in 4-13 ms (measured across all human turns), so an external
+streaming-TTS provider would have added network latency to fix the wrong
+stage. Sentence chunking keeps the zero-cost synthesizer and deletes the
+actual wait (the stream tail after sentence one). The utterance queue is
+`speechSynthesis`'s native queue — no scheduler invented. The splitter is
+deliberately conservative (whitespace-lookahead punctuation, minimum first
+flush) and its known failure mode (mid-sentence abbreviations) is accepted
+and documented rather than engineered away for spoken-style replies that
+rarely contain them. Forced consequence, kept: barge-in now aborts the
+in-flight request, since canceling only audio would leave the open stream
+refilling the queue. Measured result and the noise-vs-claim discipline
+live in LATENCY.md.
+
 ## Two instruments: headless bench plus human protocol
 
 The bench harness (app/bench.py) drives the real /chat endpoint with fixed

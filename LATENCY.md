@@ -131,7 +131,49 @@ One section per attack: what changed, the flag, before/after p50/p95 table
 
 ### Attack 1 — sentence-level TTS pipelining (OPT_SENTENCE_PIPELINING)
 
-(pending)
+**Mechanism:** stop waiting for the full LLM response — buffer the token
+stream only to the first sentence boundary, hand that sentence to
+`speechSynthesis` immediately, queue later sentences as they complete.
+Conservative splitter (terminal punctuation + whitespace lookahead, so
+decimals can't split; 12-char minimum first flush; Arabic `؟` handled;
+remainder flushed at stream end). Side effect that became a feature:
+barge-in now aborts the in-flight request (`AbortController`), because
+once audio starts mid-stream, canceling only the audio would leave the
+stream feeding the utterance queue.
+
+**Server stages: unchanged, by measurement.** Bench run 1 (flag off) vs
+run 2 (flag on): deltas of +10/-67/+114 ms scattered in both directions
+across stages the client-side flag cannot touch — noise, dismissed in both
+directions (see DECISIONS, two-instruments entry). Pipelining is pure
+client-side reshaping; the server does identical work.
+
+**Human before/after (warm, p50, same phrases/speaker/mic):**
+
+| condition | flag off | flag on | delta | n |
+| --- | --- | --- | --- | --- |
+| tap, no-tool | 2909 | 2522 | -387 | 9/10 |
+| hold, no-tool | 1356 | 1229 | -127 | 9/9 |
+| hold, weather | 3265 | 3086 | -179 | 5/4 |
+| tap, weather | 4991 | 4229 | -762* | 4/4 |
+
+Attribution control held in every condition: endpointing within noise of
+baseline (e.g. 1423 vs 1427 ms on tap). *The tap/weather -762 overstates
+the mechanism: at n=4 per side, ~-280 ms of it is send-to-first-byte
+variance; the defensible pipelining share is ~-200 ms, consistent with the
+other conditions and the bench prediction.
+
+**Hold no-tool now clears the warm target: 1229 ms p50 (target < 1500).**
+
+**The win scales with speakable tail, not with anything else.** Long chatty
+answers gave -387 ms; terse answers gave -127. And a prediction failure
+worth keeping: weather turns were predicted (verbally) to gain "over a
+second" — they gained ~180 ms, exactly what the bench's
+first_sentence_ready vs full_stream_done gap (~150-250 ms) had already
+said. A weather turn's big stream stage is the tool call plus the second
+LLM round's first token, not speakable tail; sentence one cannot exist
+before the weather data does. Lesson recorded: trust the instrument over
+the hand-wave. The weather turn's real lever is Attack 2 (speak during the
+tool call; shrink the tool itself).
 
 ### Attack 2 — tool acknowledgments (OPT_TOOL_ACK) + geocode cache (OPT_GEOCODE_CACHE)
 
