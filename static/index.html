@@ -391,6 +391,7 @@ let CFG = { flags: {}, endpoint_threshold_ms: null, model: null };
 let endpointThresholdMs = 400; // effective value; the console slider overrides
 fetch("/config").then((r) => r.json()).then((c) => {
   CFG = c;
+  if (c.flags?.OPT_PREWARM) fetch("/warmup", { method: "POST" }).catch(() => {});
   if (c.endpoint_threshold_ms) endpointThresholdMs = c.endpoint_threshold_ms;
   if (c.flags?.OPT_VAD_ENDPOINT) {
     const row = document.getElementById("ep-row");

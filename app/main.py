@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -15,12 +16,38 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from starlette.background import BackgroundTask
 
-from . import config, db, llm, memory, metrics
+from . import config, db, llm, memory, metrics, tools
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("sarjy")
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+
+async def _keepalive(state) -> None:
+    """OPT_KEEPALIVE: keep upstream connections warm through idle periods.
+
+    Cold connections cost ~1-3 s of extra TTFT (with 12-28 s stalls observed
+    after long idle), and the weather tool's p95 tail was attributed to
+    forecast-connection setup — so the ping covers both OpenAI and the
+    Open-Meteo forecast host. Pings never touch state.last_llm_at: warmth
+    labels keep meaning "time since the last real turn", which is exactly
+    what makes the keepalive effect measurable.
+    """
+    log.info("keepalive loop running (45s interval)")
+    while True:
+        await asyncio.sleep(45)
+        try:
+            await state.oai.models.retrieve(state.model)
+        except Exception:  # noqa: BLE001 — best-effort ping
+            pass
+        try:
+            await state.http.get(
+                tools.FORECAST_URL,
+                params={"latitude": 0, "longitude": 0, "current": "temperature_2m"},
+            )
+        except Exception:  # noqa: BLE001 — best-effort ping
+            pass
 
 
 @asynccontextmanager
@@ -31,7 +58,12 @@ async def lifespan(app: FastAPI):
     app.state.model = os.environ.get("SARJY_MODEL", "gpt-4.1-mini")
     # Per-user, per-page-load conversation history, RAM only.
     app.state.history = {}
+    keepalive_task = None
+    if config.flags()["OPT_KEEPALIVE"]:
+        keepalive_task = asyncio.create_task(_keepalive(app.state))
     yield
+    if keepalive_task:
+        keepalive_task.cancel()
     await app.state.http.aclose()
     app.state.conn.close()
 
@@ -88,6 +120,30 @@ async def chat(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/warmup")
+async def warmup(request: Request):
+    """OPT_PREWARM: one minimal LLM call so the first real turn is warm.
+
+    The client fires this at page load; costs about one token. Updates
+    last_llm_at because it genuinely warms the path — the next human turn
+    is warm in fact, so it should be labeled warm too.
+    """
+    if not config.flags()["OPT_PREWARM"]:
+        return {"warmed": False, "reason": "disabled"}
+    state = request.app.state
+    t0 = llm.now_ms()
+    try:
+        await state.oai.chat.completions.create(
+            model=state.model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+    except Exception:  # noqa: BLE001 — warmup must never break page load
+        return {"warmed": False}
+    state.last_llm_at = llm.now_ms()
+    return {"warmed": True, "ms": round(llm.now_ms() - t0, 1)}
 
 
 @app.get("/config")

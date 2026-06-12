@@ -151,14 +151,28 @@ def print_table(name: str, results: dict) -> None:
 async def main_async(args: argparse.Namespace) -> None:
     async with httpx.AsyncClient(timeout=90) as http:
         cfg = (await http.get(f"{args.base_url}/config")).json()
+        selected = {
+            k: v
+            for k, v in TURNS.items()
+            if not args.turns or k in args.turns.split(",")
+        }
         results: dict = {}
-        for turn_type, prompt in TURNS.items():
+        for turn_type, prompt in selected.items():
             turns = []
             for i in range(args.n):
+                if args.cold_wait:
+                    await asyncio.sleep(args.cold_wait)
+                if args.prewarm:
+                    try:
+                        await http.post(f"{args.base_url}/warmup")
+                        await asyncio.sleep(1)
+                    except httpx.HTTPError:
+                        pass
                 turns.append(
                     await run_turn(http, args.base_url, f"bench-{turn_type}-{i}", prompt)
                 )
-                await asyncio.sleep(args.sleep)
+                if not args.cold_wait:
+                    await asyncio.sleep(args.sleep)
             results[turn_type] = {"turns": turns, "agg": aggregate(turns)}
 
         snapshot = {
@@ -167,6 +181,8 @@ async def main_async(args: argparse.Namespace) -> None:
             "endpoint_threshold_ms": cfg.get("endpoint_threshold_ms"),
             "input_mode": "hold",
             "synthetic": True,
+            "cold_wait_s": args.cold_wait,
+            "prewarm_each_turn": args.prewarm,
         }
         print_table(args.name, results)
 
@@ -194,6 +210,15 @@ def main() -> None:
     parser.add_argument("--n", type=int, default=10)
     parser.add_argument("--sleep", type=float, default=0.5)
     parser.add_argument("--token", default="")
+    parser.add_argument("--turns", default="", help="comma-separated subset of turn types")
+    parser.add_argument(
+        "--cold-wait", type=float, default=0,
+        help="sleep this many seconds BEFORE each turn (cold sampling)",
+    )
+    parser.add_argument(
+        "--prewarm", action="store_true",
+        help="POST /warmup before each turn, after the cold wait",
+    )
     asyncio.run(main_async(parser.parse_args()))
 
 
