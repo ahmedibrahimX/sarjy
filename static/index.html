@@ -371,6 +371,10 @@ const userId = (() => {
 const sessionId = (crypto.randomUUID && crypto.randomUUID()) ||
   "s-" + Date.now() + "-" + Math.random().toString(36).slice(2);
 
+/* server config: optimization flags + endpointing threshold (Phase 2) */
+let CFG = { flags: {}, endpoint_threshold_ms: null, model: null };
+fetch("/config").then((r) => r.json()).then((c) => { CFG = c; }).catch(() => {});
+
 /* ── state machine: idle | listening | thinking | speaking ── */
 let state = "idle";
 function setState(next, label) {
@@ -458,7 +462,7 @@ let rec = null;
 
 function startListening() {
   speechSynthesis.cancel();
-  t = {};
+  t = { input_mode: "tap" }; // upgraded to "hold" if the press is held to release
   vadStart();
   const bubble = addBubble("user", "…");
   let finalText = "";
@@ -535,6 +539,8 @@ function pressUp() {
   holdActive = false;
   if (state !== "listening") return;
   if (!startedHere || wasHold) {
+    if (startedHere) t.input_mode = "hold";
+    t.release = Date.now(); // explicit end signal: perceived latency starts here
     rec?.stop(); // tap while already listening, or hold released: send now
   } else {
     $("hint").textContent = "listening — tap when done"; // quick tap: auto-endpoint mode
@@ -570,7 +576,7 @@ $("type-form").addEventListener("submit", (e) => {
   $("type-input").value = "";
   speechSynthesis.cancel();
   const now = Date.now();
-  t = { speech_end: now, transcript_final: now, typed: true };
+  t = { speech_end: now, transcript_final: now, typed: true, input_mode: "typed" };
   addBubble("user", text);
   sendTurn(text);
 });
@@ -716,15 +722,17 @@ function finishTurn(server) {
   if (t.posted) return;
   t.posted = true;
   const d = (a, b) => (t[a] != null && t[b] != null) ? Math.max(0, t[b] - t[a]) : null;
-  // Perceived-latency basis: true acoustic speech end (VAD), else the
+  // Perceived-latency basis, per input mode: an explicit release (hold mode
+  // or manual tap-stop) wins; else true acoustic speech end (VAD), else the
   // last interim transcript update, else Chrome's (late) speech_end stamp.
-  const t0 = t.speech_end_vad ?? t.last_interim ?? t.speech_end;
+  const t0 = t.release ?? t.speech_end_vad ?? t.last_interim ?? t.speech_end;
   const turn = {
-    client: { ...t },
+    // effective threshold is null while Chrome's native endpointer decides
+    client: { ...t, endpoint_threshold_ms: CFG.flags?.OPT_VAD_ENDPOINT ? CFG.endpoint_threshold_ms : null },
     server: server,
     derived: {
       ttfa_ms: (t.first_audio != null && t0 != null) ? Math.max(0, t.first_audio - t0) : null,
-      ttfa_basis: t.typed ? "typed" : (t.speech_end_vad ? "vad" : (t.last_interim ? "interim" : "finalize")),
+      ttfa_basis: t.typed ? "typed" : (t.release ? "release" : (t.speech_end_vad ? "vad" : (t.last_interim ? "interim" : "finalize"))),
       endpoint_ms: (t.transcript_final != null && t0 != null) ? Math.max(0, t.transcript_final - t0) : null,
       send_to_first_byte_ms: d("request_sent", "first_byte"),
       stream_ms: d("first_byte", "stream_done"),
@@ -756,7 +764,7 @@ function renderWaterfall(turn) {
   $("ttfa-num").textContent = Math.round(total);
   $("ttfa-mini").textContent = `ttfa ${Math.round(total)} ms`;
 
-  const t0 = t.speech_end_vad ?? t.last_interim ?? t.speech_end;
+  const t0 = t.release ?? t.speech_end_vad ?? t.last_interim ?? t.speech_end;
   const stages = [
     { lbl: "stt endpoint+final", cls: "stt",  from: t0,             to: t.transcript_final },
     { lbl: "send → 1st byte", cls: "net",    from: t.request_sent, to: t.first_byte },
@@ -764,8 +772,9 @@ function renderWaterfall(turn) {
     { lbl: "tts engine",      cls: "tts",    from: t.tts_start,    to: t.first_audio },
   ];
   $("wf-note").textContent =
-    `speech-end basis: ${turn.derived.ttfa_basis} · client rows use the client clock, ` +
-    `server readout uses the server clock — never mixed. TTFA is measured entirely client-side.`;
+    `speech-end basis: ${turn.derived.ttfa_basis} · input: ${t.input_mode || "tap"} · ` +
+    `client rows use the client clock, server readout uses the server clock — never mixed. ` +
+    `TTFA is measured entirely client-side.`;
   $("wf-rows").innerHTML = stages.map((s) => {
     if (s.from == null || s.to == null) return "";
     const ms = Math.max(0, s.to - s.from);

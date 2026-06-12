@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from starlette.background import BackgroundTask
 
-from . import db, llm, memory, metrics
+from . import config, db, llm, memory, metrics
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("sarjy")
@@ -83,14 +83,30 @@ async def chat(request: Request):
     )
 
 
+@app.get("/config")
+async def get_config(request: Request):
+    return {
+        "flags": config.flags(),
+        "endpoint_threshold_ms": config.endpoint_threshold_ms(),
+        "model": request.app.state.model,
+    }
+
+
 @app.post("/metrics")
 async def post_metrics(request: Request):
     body = await request.json()
     user_id = (body.get("user_id") or "anonymous").strip()
     turn = body.get("turn") or {}
+    # Turn payloads carry timings and labels only — never transcript text.
+    # The dashboard reading these rows is public, so keep it that way.
+    client = turn.get("client") or {}
+    snap = config.snapshot(request.app.state.model, client.get("endpoint_threshold_ms"))
+    # input_mode rides in the snapshot so the dashboard slices it like any
+    # other dimension; hold and tap distributions must never be mixed.
+    snap["input_mode"] = client.get("input_mode") or "unknown"
     # One structured JSON line per turn, plus a SQLite row for later analysis.
-    log.info(json.dumps({"event": "turn_metrics", "user_id": user_id, "turn": turn}))
-    metrics.save_turn(request.app.state.conn, user_id, turn)
+    log.info(json.dumps({"event": "turn_metrics", "user_id": user_id, "turn": turn, "config": snap}))
+    metrics.save_turn(request.app.state.conn, user_id, turn, snap)
     return {"ok": True}
 
 
