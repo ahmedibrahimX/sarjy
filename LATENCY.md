@@ -338,7 +338,25 @@ scoped to the common case.
 
 ### Attack 5 (stretch) — model TTFT A/B through the provider seam
 
-(pending)
+Three models through the identical deployed pipeline, same hour, N=20 warm
+turns each (short + long no-tool), bench runs 10-12:
+
+| model | TTFT p50 | TTFT p95 | stream chars/s p50 | long-reply full stream p50 |
+| --- | --- | --- | --- | --- |
+| gpt-4.1-mini (incumbent) | 413 | 605 | 412 | 1438 |
+| gpt-4o-mini | 463 | 668 | 340 | 1502 |
+| gpt-4.1-nano | 522 | 935 | 299 | 1633 |
+
+The incumbent wins every axis, and the notable finding is that **smaller is
+not faster**: nano trails mini by ~110 ms TTFT and ~27% streaming
+throughput. At this scale, serving infrastructure and capacity allocation
+dominate model size. Model choice is a real latency lever — the data just
+says we already hold the right one, which would have been wrong to assume
+in either direction. Caveats: one same-hour sweep, warm turns only, latency
+axis only (reply quality and tool-calling reliability unmeasured; the
+incumbent is also the strongest of the three there, making the decision
+one-sided). No change shipped; the provider seam earned its existence by
+making this a 15-minute verification.
 
 ## Failed experiments
 
