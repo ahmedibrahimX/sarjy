@@ -414,6 +414,13 @@ zero stalls, all-warm paths, and tool times within a 4 ms spread.
 
 (Chart built from the measured p50s above by `charts/build_charts.py`.)
 
+Sample-size note: n=4 before vs n=8 after, with complete separation —
+every shipped-config turn was faster than every baseline turn, on both
+perceived (1743-2246 vs 4258-5113 ms) and actual (3316-3829 vs 4258-5113)
+— exact rank-test p = 0.002. Small N limits the precision of the medians
+(why p95s are never claimed here), not the detectability of an effect
+this large.
+
 ## The wins, by instrument
 
 Five of the six optimizations act on the client or on perception, which a
