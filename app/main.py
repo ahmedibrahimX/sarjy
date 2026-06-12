@@ -48,8 +48,15 @@ async def chat(request: Request):
     if not message:
         return JSONResponse({"error": "empty message"}, status_code=400)
 
-    timings = {"t_request_received": llm.now_ms()}
     state = request.app.state
+    now = llm.now_ms()
+    # Warmth heuristic: cold if the previous LLM call was >60s ago (or never).
+    last = getattr(state, "last_llm_at", None)
+    timings = {
+        "t_request_received": now,
+        "warmth": "cold" if last is None or now - last > 60_000 else "warm",
+    }
+    state.last_llm_at = now
     # A new page load sends a new session_id: the conversation resets, and
     # the SQLite facts table is the only thing that crosses sessions.
     entry = state.history.get(user_id)
@@ -122,15 +129,54 @@ async def delete_memory(request: Request, fact_id: int, user_id: str = ""):
     return {"deleted": deleted}
 
 
-@app.get("/admin/db")
-async def export_db(request: Request):
-    """Token-gated snapshot of the SQLite file, for offline metrics analysis."""
+def _admin_guard(request: Request) -> JSONResponse | None:
+    """None when authorized; an error response otherwise."""
     expected = os.environ.get("SARJY_ADMIN_TOKEN")
     if not expected:
-        return JSONResponse({"error": "export disabled"}, status_code=404)
+        return JSONResponse({"error": "admin endpoints disabled"}, status_code=404)
     provided = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not secrets.compare_digest(provided, expected):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return None
+
+
+@app.post("/admin/metrics/clear")
+async def clear_metrics(request: Request):
+    """Purge turn metrics (facts and bench runs untouched). Used to discard
+    rows collected under older measurement methodology or demo junk."""
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    deleted = metrics.clear_turns(request.app.state.conn)
+    log.info(json.dumps({"event": "metrics_cleared", "rows": deleted}))
+    return {"deleted": deleted}
+
+
+@app.post("/bench_runs")
+async def create_bench_run(request: Request):
+    """Store a bench run (write path is admin-gated; dashboard reads are public)."""
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    run_id = metrics.save_bench_run(
+        request.app.state.conn,
+        name,
+        body.get("config_snapshot") or {},
+        body.get("results") or {},
+    )
+    return {"id": run_id}
+
+
+@app.get("/admin/db")
+async def export_db(request: Request):
+    """Token-gated snapshot of the SQLite file, for offline metrics analysis."""
+    denied = _admin_guard(request)
+    if denied:
+        return denied
     # Backup API gives a consistent snapshot even mid-write.
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         snapshot_path = tmp.name

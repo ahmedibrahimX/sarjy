@@ -1,0 +1,113 @@
+# Sarjy — Latency Deep Dive (Time-to-First-Audio)
+
+The working document for Phase 2. Populated as each attack lands; nothing
+here is claimed without a stored bench run or labeled dashboard data behind
+it.
+
+## Metric definitions
+
+- **TTFA (actual):** speech end → first audio of substantive content.
+- **TTFA (perceived):** speech end → first audio of any speech, including
+  tool acknowledgments. Never conflated with actual.
+- **Speech end is defined per input mode** — `hold`: the mic/space release
+  (explicit signal, endpointing ~0); `tap`: VAD-detected silence; `typed`:
+  submission time. Distributions are never mixed across modes.
+- Every turn labeled `warm`/`cold` (server-side: cold = first LLM call in
+  60s) and `tool`/`no-tool`. p50/p95 over N runs; no single-turn anecdotes.
+- Every metrics row and bench run stores a `config_snapshot` (all OPT_*
+  flags, model, endpointing threshold, input mode), so each improvement is
+  attributable to the flag that caused it.
+
+## Input modes: explicit signal beats VAD
+
+Hold-to-talk releases give an exact, free speech-end signal — endpointing
+cost is ~0 by construction, which makes hold turns the control group.
+Tap mode pays the endpointing wait (measured ~865 ms on Chrome's native
+endpointer), and Attack 3's threshold curve is the price of going
+hands-free: phone calls and smart speakers have no spacebar.
+
+Note on old data: all metrics collected before the input-mode label (and
+before the VAD, in the earliest rows) were discarded — they were measured
+with three different rulers and could not be relabeled honestly.
+
+## Baseline (Phase 1 pipeline, all OPT_* flags off)
+
+Anecdotal reference: the recorded demo's warm weather turn showed ~4.1 s
+TTFA (tap mode, Chrome endpointer), decomposed as ~865 ms endpointing,
+~0.5 s warm TTFT, ~1.25 s weather tool, ~2.1 s stream tail, ~10 ms TTS.
+
+Canonical baseline bench runs (synthetic hold mode, server+network stages):
+
+### Local (iteration reference only)
+
+`baseline-local`, bench_run id=1 (local DB), N=10, synthetic hold mode, ms:
+
+| stage | short p50 | short p95 | long p50 | long p95 | weather p50 | weather p95 |
+| --- | --- | --- | --- | --- | --- | --- |
+| send to first byte | 648 | 1546 | 508 | 582 | 662 | 2096 |
+| server TTFT | 647 | 1545 | 507 | 581 | 595 | 1990 |
+| server tools | 0 | 0 | 0 | 0 | 147 | 681 |
+| server total | 734 | 1757 | 1000 | 1130 | 1688 | 3055 |
+| first sentence ready | 725 | 1705 | 672 | 748 | 1563 | 2919 |
+| full stream done | 735 | 1758 | 1001 | 1131 | 1690 | 3056 |
+
+Early reads (local only, do not headline): pipelining's gap (first sentence
+vs full stream) is ~330 ms p50 on long answers and ~10 ms on one-sentence
+answers — the win scales with reply length. The weather tool cost only
+~150 ms p50 from this machine vs ~1250 ms measured from Railway — network
+path dominates tool cost, which is exactly why headline numbers only come
+from the deployed instance.
+
+### Deployed (the headline baseline)
+
+(to be filled by `bench --name baseline-prod` after the Phase 2 deploy,
+before any flag is enabled)
+
+### In-browser client stages (manual protocol)
+
+(to be filled: tap and hold sessions on the deployed instance, see
+collection protocol in PLAN.md)
+
+## Attack log
+
+One section per attack: what changed, the flag, before/after p50/p95 table
+(stored bench run ids), verdict, and anything that failed and why.
+
+### Attack 1 — sentence-level TTS pipelining (OPT_SENTENCE_PIPELINING)
+
+(pending)
+
+### Attack 2 — tool acknowledgments (OPT_TOOL_ACK) + geocode cache (OPT_GEOCODE_CACHE)
+
+(pending)
+
+### Attack 3 — endpointing threshold, tap mode only (OPT_VAD_ENDPOINT)
+
+(pending — tradeoff curve at three thresholds, hold turns as control)
+
+### Attack 4 — cold start: keep-alive (OPT_KEEPALIVE), pre-warm (OPT_PREWARM), prefix caching
+
+(pending — prefix-cache experiment pre-registered as a likely null result:
+prompt is ~300 tokens, OpenAI automatic caching starts at ~1k)
+
+### Attack 5 (stretch) — model TTFT A/B through the provider seam
+
+(pending)
+
+## Failed experiments
+
+(populated as they happen — a measured null result with a kept-but-off
+toggle is a deliverable, not a waste)
+
+## Targets
+
+- Warm no-tool turn: < 1.5 s TTFA (actual), p50
+- Tool turn: < 2 s TTFA (perceived), p50
+
+If a target is missed, the honest analysis of why goes here.
+
+## With another week
+
+(running list: per-user adaptive endpointing, edge deployment close to
+users, speculative first clause, streaming STT to control endpointing
+server-side)

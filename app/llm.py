@@ -8,7 +8,7 @@ import httpx
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from . import memory, tools
+from . import memory, provider, tools
 
 
 def now_ms() -> float:
@@ -60,11 +60,8 @@ async def run_turn(  # noqa: C901, PLR0913 — deliberately one linear orchestra
     reply_parts: list[str] = []
 
     while True:
-        stream = await oai.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools.TOOL_SCHEMAS,
-            stream=True,
+        stream = provider.stream_chat(
+            oai, model=model, messages=messages, tools=tools.TOOL_SCHEMAS
         )
         calls: dict[int, dict] = {}
         text_parts: list[str] = []
