@@ -405,14 +405,25 @@ threshold spends ~500 ms of speed to tolerate human hesitation (Attack 3's
 deterministic clip law), and the console slider demonstrates the 400 ms
 setting reaching the target live. Hold mode passes everything with margin.
 
-End-to-end arc: the Phase 1 demo's tap weather turn measured ~4.1 s TTFA.
-The same turn class at shipped config: **1.96 s perceived / ~3.5 s actual
-(tap), ~1.0 s perceived (hold)** — and the final 8-rep validation showed
-zero stalls, all-warm paths, and tool times within a 4 ms spread.
+End-to-end arc: the same turn class at shipped config runs at **1.96 s
+perceived / ~3.5 s actual (tap), ~1.0 s perceived (hold)** — and the final
+8-rep validation showed zero stalls, all-warm paths, and tool times within
+a 4 ms spread.
+
+Baseline reconciliation, stated once for every place a reader may have
+seen "~4.1 s": that figure was the original single-turn measurement from
+the Phase 1 demo recording — a luckier-than-median turn, as proper
+measurement later showed. The frozen baseline for this condition (tap
+weather, warm, flags off, n=4 deployed turns) came in at 4991 ms p50, the
+"5.0 s" in the chart below. All deltas in this document are computed
+against the measured baseline, not the anecdote.
 
 ![The same weather question, before and after: 5.0 s actual baseline vs voice starting at 1.96 s perceived with the reply streaming under audio](charts/before_after_waterfall.png)
 
-(Chart built from the measured p50s above by `charts/build_charts.py`.)
+(Chart built from the measured p50s above by `charts/build_charts.py`.
+The before bar is the frozen n=4 measured baseline, 4991 ms p50 — not the
+oft-quoted ~4.1 s, which was the single-turn demo measurement; see the
+baseline reconciliation above.)
 
 **Statistical grounding:** n=4 before vs n=8 after, with complete
 separation — every shipped-config turn was faster than every baseline

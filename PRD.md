@@ -104,7 +104,9 @@ measured), boring technology everywhere the deep dive is not.
 
 - Per-user adaptive endpointing (learn a speaker's pause profile instead
   of one global threshold).
-- Provider/model TTFT comparison through the seam (stretch attack).
+- Cross-provider TTFT comparison through the provider seam (Groq's TTFT
+  is the obvious candidate); within-provider model comparison is the
+  stretch attack's scope.
 - First-token stalls (observed: a 6.8 s OpenAI TTFT outlier) — timeout
   and retry, or speculative filler past a threshold.
 - Production observability: ship the same per-turn events to a real
