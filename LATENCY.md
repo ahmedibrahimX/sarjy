@@ -32,7 +32,9 @@ it.
   specimens — 3221 / 6178 / 6769 / 12210 / 12832 / 28252 / 60883 ms —
   out of ~340 measured turns, a ~2% rate. Five of the seven hit
   warm-labeled paths (including the 61 s one), confirming the class is
-  orthogonal to connection warming. Three landed in a single 90-second
+  orthogonal to connection warming. The earliest specimen (3221 ms) is
+  the turn behind the human baseline's hold/no-tool p95 of 4325 — at
+  n=9, one stall owned that cell. Three landed in a single 90-second
   window after a long idle period, suggesting provider-side episodes
   rather than independent events. Implication for production: a
   first-token timeout near 3 s with one retry would have converted every
