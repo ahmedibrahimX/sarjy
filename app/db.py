@@ -20,6 +20,15 @@ CREATE TABLE IF NOT EXISTS metrics (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS geocode_cache (
+    city_key TEXT PRIMARY KEY,
+    name TEXT,
+    country TEXT,
+    latitude REAL,
+    longitude REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS bench_run (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,

@@ -1,5 +1,9 @@
+import sqlite3
+
 import httpx
 from openai.types.chat import ChatCompletionToolParam
+
+from . import config
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -75,20 +79,49 @@ TOOL_SCHEMAS: list[ChatCompletionToolParam] = [
 ]
 
 
-async def get_weather(http: httpx.AsyncClient, city: str) -> dict:
+async def get_weather(
+    http: httpx.AsyncClient, city: str, conn: sqlite3.Connection | None = None
+) -> dict:
     """Geocode the city, then fetch current conditions.
 
     Returns a flat dict the LLM can read out; errors come back as
     {"error": ...} so the model can answer honestly instead of inventing data.
+    City coordinates never change, so geocoding results are cached in SQLite
+    behind OPT_GEOCODE_CACHE — a hit skips half the round-trips.
     """
     if not city.strip():
         return {"error": "no city given"}
-    geo = await http.get(GEOCODE_URL, params={"name": city, "count": 1})
-    geo.raise_for_status()
-    results = geo.json().get("results") or []
-    if not results:
-        return {"error": f"could not find a city named '{city}'"}
-    place = results[0]
+    city_key = city.strip().lower()
+    if not config.flags()["OPT_GEOCODE_CACHE"]:
+        conn = None  # flag off: behave exactly like Phase 1
+    place: dict | None = None
+    if conn is not None:
+        row = conn.execute(
+            "SELECT name, country, latitude, longitude FROM geocode_cache WHERE city_key = ?",
+            (city_key,),
+        ).fetchone()
+        if row:
+            place = dict(row)
+    if place is None:
+        geo = await http.get(GEOCODE_URL, params={"name": city, "count": 1})
+        geo.raise_for_status()
+        results = geo.json().get("results") or []
+        if not results:
+            return {"error": f"could not find a city named '{city}'"}
+        place = results[0]
+        if conn is not None:
+            conn.execute(
+                "INSERT OR REPLACE INTO geocode_cache "
+                "(city_key, name, country, latitude, longitude) VALUES (?, ?, ?, ?, ?)",
+                (
+                    city_key,
+                    place.get("name"),
+                    place.get("country"),
+                    place["latitude"],
+                    place["longitude"],
+                ),
+            )
+            conn.commit()
     forecast = await http.get(
         FORECAST_URL,
         params={

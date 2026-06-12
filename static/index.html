@@ -615,10 +615,28 @@ async function sendTurn(text) {
   const settle = (e) => {
     pendingUtterances--;
     if (pendingUtterances === 0 && streamComplete && state === "speaking") setState("idle");
+    if (pendingUtterances === 0 && !streamComplete && state === "speaking") {
+      setState("thinking"); // the ack finished before the answer arrived
+    }
     const canceled = e && (e.error === "canceled" || e.error === "interrupted");
     if (e && e.type === "error" && !canceled && t.first_audio == null && streamComplete) {
       finishTurn(server); // audio failed outright; keep the turn's metrics
     }
+  };
+
+  /* spoken acknowledgment (OPT_TOOL_ACK): audio during the tool round-trip.
+     Counts toward perceived TTFA only — never toward actual/content. */
+  const speakAck = (text) => {
+    if (!text || aborter.signal.aborted) return;
+    const u = new SpeechSynthesisUtterance(text);
+    pendingUtterances++;
+    u.onstart = () => {
+      if (t.first_audio_any == null) t.first_audio_any = Date.now();
+      setState("speaking");
+    };
+    u.onend = settle;
+    u.onerror = settle;
+    speechSynthesis.speak(u);
   };
 
   const enqueueSpeech = (chunk) => {
@@ -710,10 +728,12 @@ async function sendTurn(text) {
             reply.textContent = full;
             scrollDown();
             if (pipelined) flushSentences(false);
+          } else if (ev.type === "tool_ack") {
+            speakAck(ev.text);
           } else if (ev.type === "tool") {
-            if (ev.status === "start") {
+            if (ev.status === "start" && state !== "speaking") {
               setState("thinking", ev.name === "get_weather" ? "checking weather…" : "saving a memory…");
-            } else if (ev.name === "remember_fact") {
+            } else if (ev.status === "end" && ev.name === "remember_fact") {
               loadMemories();
             }
           } else if (ev.type === "done") {
@@ -760,6 +780,7 @@ function speak(text, server) {
   const u = new SpeechSynthesisUtterance(text);
   u.onstart = () => {
     t.first_audio = Date.now();
+    t.first_audio_content = t.first_audio;
     setState("speaking");
     finishTurn(server);
   };

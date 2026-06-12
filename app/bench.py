@@ -39,6 +39,7 @@ STAGES = [
     "send_to_first_byte_ms",
     "server_ttft_ms",
     "server_tools_ms",
+    "ack_ready_ms",
     "server_total_ms",
     "first_sentence_ready_ms",
     "full_stream_done_ms",
@@ -55,6 +56,7 @@ async def run_turn(
     t_speech_end = now_ms()  # synthetic, hold-mode semantics
     first_byte: float | None = None
     first_sentence: float | None = None
+    first_ack: float | None = None
     text = ""
     server: dict = {}
     async with http.stream(
@@ -87,6 +89,10 @@ async def run_turn(
                             and text.rstrip().endswith(SENTENCE_END)
                         ):
                             first_sentence = now_ms()
+                    elif event["type"] == "tool_ack":
+                        # when audio could start under OPT_TOOL_ACK (perceived floor)
+                        if first_ack is None:
+                            first_ack = now_ms()
                     elif event["type"] == "done":
                         server = event.get("server") or {}
                     elif event["type"] == "error":
@@ -103,6 +109,7 @@ async def run_turn(
         "server_tools_ms": round(
             sum(t.get("duration_ms", 0) for t in server.get("tools") or []), 1
         ),
+        "ack_ready_ms": round(first_ack - t_speech_end, 1) if first_ack else None,
         "server_total_ms": round(complete - received, 1) if complete and received else None,
         "first_sentence_ready_ms": round(first_sentence - t_speech_end, 1),
         "full_stream_done_ms": round(stream_done - t_speech_end, 1),

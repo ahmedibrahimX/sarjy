@@ -8,7 +8,7 @@ import httpx
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from . import memory, provider, tools
+from . import config, memory, provider, tools
 
 
 def now_ms() -> float:
@@ -114,6 +114,14 @@ async def run_turn(  # noqa: C901, PLR0913 — deliberately one linear orchestra
                 ],
             },
         )
+        # Spoken acknowledgment so the tool round-trip runs under audio.
+        # Templated, no extra LLM call; only worth it for slow tools —
+        # remember_fact finishes in ~15 ms, an ack would outlast it.
+        if config.flags()["OPT_TOOL_ACK"]:
+            ack = _tool_ack_text(ordered[0])
+            if ack:
+                yield {"type": "tool_ack", "text": ack}
+
         for call in ordered:
             yield {"type": "tool", "name": call["name"], "status": "start"}
             t_start = now_ms()
@@ -149,6 +157,16 @@ async def run_turn(  # noqa: C901, PLR0913 — deliberately one linear orchestra
     yield {"type": "done", "reply": reply, "server": timings}
 
 
+def _tool_ack_text(call: dict) -> str | None:
+    if call["name"] != "get_weather":
+        return None
+    try:
+        city = json.loads(call["arguments"] or "{}").get("city", "")
+    except json.JSONDecodeError:
+        city = ""
+    return f"Checking the weather in {city}." if city else "Checking the weather."
+
+
 async def _execute_tool(
     call: dict,
     *,
@@ -162,7 +180,7 @@ async def _execute_tool(
         return {"error": "malformed tool arguments"}
     try:
         if call["name"] == "get_weather":
-            return await tools.get_weather(http, args.get("city", ""))
+            return await tools.get_weather(http, args.get("city", ""), conn=conn)
         if call["name"] == "remember_fact":
             saved = memory.save_fact(conn, user_id, args.get("fact", ""))
             return {"saved": saved}
