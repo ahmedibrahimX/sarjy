@@ -28,6 +28,16 @@ it.
   are an operational class with their own mitigation (first-token timeout
   and retry, next-week list).
 
+  Full stall census (every turn, both instruments, TTFT > 3 s): seven
+  specimens — 3221 / 6178 / 6769 / 12210 / 12832 / 28252 / 60883 ms —
+  out of ~340 measured turns, a ~2% rate. Five of the seven hit
+  warm-labeled paths (including the 61 s one), confirming the class is
+  orthogonal to connection warming. Three landed in a single 90-second
+  window after a long idle period, suggesting provider-side episodes
+  rather than independent events. Implication for production: a
+  first-token timeout near 3 s with one retry would have converted every
+  specimen into roughly a one-retry delay.
+
 ## Input modes: explicit signal beats VAD
 
 Hold-to-talk releases give an exact, free speech-end signal — endpointing
