@@ -1,5 +1,7 @@
 # Sarjy — Phase 1 Plan (Walking Skeleton) — complete
 
+Original pre-code plan, kept as-is for provenance. Consolidated view: PRD.md
+
 Phase 2 plan: see "Phase 2 — Latency Deep Dive" at the bottom of this file.
 
 ## File layout

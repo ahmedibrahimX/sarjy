@@ -5,6 +5,9 @@ it remembers you across sessions, and it can check real weather anywhere.
 Every turn is instrumented end-to-end: the latency console in the UI shows a
 per-stage waterfall with time-to-first-audio as the headline metric.
 
+Start here: [PRD.md](PRD.md) (intent) · [LATENCY.md](LATENCY.md) (results) ·
+[DECISIONS.md](DECISIONS.md) (reasoning).
+
 ## Quickstart
 
 ```bash
