@@ -483,6 +483,23 @@ the fingerprint of a real effect; everything else reshuffles. (A third
 identical-config run confirmed: tools 148/149/149 across three runs while
 totals bounced 1478/1879/1747.)
 
+**Where the totals wobble lives.** A weather turn's `server_total` is three
+phases summed, and only the middle one is ours:
+
+```mermaid
+flowchart LR
+    A["round 1: LLM decides to<br/>call get_weather<br/>(~480 ms, stable)"] --> B["tool: geocode + forecast<br/>(148 ms cached —<br/>148/149/149 across runs)"]
+    B --> C["round 2: LLM writes the<br/>spoken answer<br/>(~850-1250 ms, noisy)"]
+    C --> D["server_total<br/>= sum of all three"]
+```
+
+The wobble is entirely round 2, driven by two factors no flag can reach:
+**how many tokens the model decides to write for its free-text answer that
+particular time, and OpenAI's generation throughput that minute.** Runs 15
+and 16, identical config: same round 1, same tool, but round 2 cost ~850 ms
+in one and ~1250 ms in the other. That is why turn totals carry a ±400 ms
+floor while the tool slice inside them holds to 1 ms.
+
 **Scope of the noise floor — what it does and does not touch.** The floor
 bounds one class of claim: server turn-total deltas at N=10. The headline
 wins do not live there; each rests on evidence noise cannot produce:
