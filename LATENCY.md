@@ -479,7 +479,24 @@ inside it is unclaimable in either direction; (2) the rerun retracted this
 document's own earlier suggestion that warm serving "compounds into half a
 second off totals" — the reproducible weather win is the tool stage; the
 rest of that -501 was wobble with a flattering sign. Reproducibility is
-the fingerprint of a real effect; everything else reshuffles.
+the fingerprint of a real effect; everything else reshuffles. (A third
+identical-config run confirmed: tools 148/149/149 across three runs while
+totals bounced 1478/1879/1747.)
+
+**Scope of the noise floor — what it does and does not touch.** The floor
+bounds one class of claim: server turn-total deltas at N=10. The headline
+wins do not live there; each rests on evidence noise cannot produce:
+per-turn structure (the perceived gap exists inside every single tool
+turn — the ack fires at first byte by mechanism, ~1.6 s before content,
+8/8 tap and 4/4 hold); dose-response (the endpoint stage tracked the
+threshold slider across three settings); exact reproduction (tool cache,
+1 ms spread over three runs); convergent mechanisms (prewarm and
+completion-ping keepalive independently landing at ~480 ms cold TTFT);
+and cross-instrument prediction (the bench's first-sentence gap forecast
+pipelining's human delta before the attack was built, and raw turns show
+audio starting before stream_done). Noise can flatter or insult a
+difference between two runs; it cannot do any of those five things. The
+one claim that had none of these properties is the one that was retracted.
 
 ## With another week
 
