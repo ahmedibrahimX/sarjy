@@ -27,6 +27,8 @@
   }
   h2 { font-size: .8rem; font-weight: 500; color: var(--muted);
        text-transform: uppercase; letter-spacing: .1em; margin: 0 0 12px; }
+  .feed-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .feed-head span { color: var(--amber); }
   .empty { color: var(--muted); padding: 8px 0; }
 
   /* turn feed */
@@ -100,7 +102,7 @@
 <div class="sub">public · timings, labels and config only — no conversation content · polls every 2.5 s</div>
 
 <section>
-  <h2>live turn feed (last 20)</h2>
+  <h2 class="feed-head">live turn feed (last 20) <span>perceived ttfa</span></h2>
   <div id="feed"><div class="empty">No turns yet — talk to Sarjy in another tab.</div></div>
   <div class="legend">
     <span class="l-stt">endpoint+stt</span><span class="l-net">send→1st byte</span>
