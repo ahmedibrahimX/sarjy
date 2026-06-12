@@ -33,12 +33,21 @@ async def _keepalive(state) -> None:
     Open-Meteo forecast host. Pings never touch state.last_llm_at: warmth
     labels keep meaning "time since the last real turn", which is exactly
     what makes the keepalive effect measurable.
+
+    The OpenAI ping is a real 1-token completion, not a GET: bench runs
+    5/7/8 showed a metadata ping only trims the connection-setup tail
+    (p95), while the median cold cost is provider-side serving warmth that
+    only an actual completion refreshes. Cost: ~1 token per 45 s.
     """
     log.info("keepalive loop running (45s interval)")
     while True:
         await asyncio.sleep(45)
         try:
-            await state.oai.models.retrieve(state.model)
+            await state.oai.chat.completions.create(
+                model=state.model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
         except Exception:  # noqa: BLE001 — best-effort ping
             pass
         try:
