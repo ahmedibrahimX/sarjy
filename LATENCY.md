@@ -426,7 +426,6 @@ view of every win and the instrument that measured it:
 | tool turns, perceived | TTFA perceived p50 (human) | — (nothing spoke early) | 1961 tap / 1021 hold |
 | no-tool TTFA, actual | p50 (human) | 2909 tap / 1356 hold | 2522 / 1229 |
 | weather tool cost | server tools p50 (bench) | 310 | 148, tail deleted |
-| weather server total | p50 (bench, same-hour) | 1980 | 1478 |
 | cold first token | TTFT p50 (bench) | 693 | 473 prewarm / 494 keepalive |
 
 The server bench below is the **control, not the scoreboard**: it verifies
@@ -461,12 +460,26 @@ minutes apart, N=10 per turn type.** Weather turns, p50:
   (endpointing, pipelining) and live in the human tables above; the bench
   proving the server didn't move is the attribution control, and the
   fake regressions of the 11-hour pair are absent.
-- **Weather turns: every mechanism-bearing stage moved.** The cache halves
-  the tool and deletes its tail; warm serving compounds into about half a
-  second off totals; the acknowledgment defines a perceived floor at
-  ~820 ms from request start.
+- **Weather turns: the tool stage is the claim** — the cache halves it
+  (310 to 148) and deletes its tail (p95 1237 to 150). The acknowledgment
+  defines a perceived floor at ~820 ms from request start. Turn totals
+  inherit the tool win but carry their own generation wobble (see the
+  noise-floor rerun below); the -501 total delta in this pair flattered.
 - Run 13's observation stands: with keepalive on, a fresh bench session
   produced zero cold turns.
+
+**Noise-floor rerun (run 16, identical config to run 15):** re-running the
+all-on leg unchanged reshuffled every non-mechanism delta — long-turn
+first_sentence went from +83 (off vs on) to -118 (on vs on-again),
+long totals swung -229 and weather totals +401 between identical configs —
+while the tool stage reproduced within 1 ms (148 to 149). Two lessons,
+recorded as method: (1) the same-config noise floor is ±230 ms on long
+totals and ±400 ms on weather totals at N=10, and any off-vs-on cell
+inside it is unclaimable in either direction; (2) the rerun retracted this
+document's own earlier suggestion that warm serving "compounds into half a
+second off totals" — the reproducible weather win is the tool stage; the
+rest of that -501 was wobble with a flattering sign. Reproducibility is
+the fingerprint of a real effect; everything else reshuffles.
 
 ## With another week
 
