@@ -98,8 +98,10 @@ fixed phrases, all flags off. Warm turns only (cold singletons noted), ms:
 | tap, weather | 4 | 4991 | 5113 | 1470 | 1158 | 2378 | 6 |
 | hold, weather | 5 | 3265 | 4238 | 118 | 998 | 2150 | 4 |
 
-(plus one cold turn each in tap/no-tool, hold/no-tool, tap/weather; the
-hold/weather block ran immediately after tap, so it has no cold sample)
+(plus one cold turn in each condition — n=1 anecdotes, not distributions;
+the cold hold/weather turn landed at 4645 ms TTFA with a 3633 ms stream
+stage, consistent with cold-connection costs hitting both OpenAI and
+Open-Meteo on the same turn)
 
 Findings:
 
