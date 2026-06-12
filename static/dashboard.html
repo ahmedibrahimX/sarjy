@@ -219,7 +219,10 @@ function cfgBadges(cfg, other) {
 
 async function compare() {
   const a = $("run-a").value, b = $("run-b").value;
-  if (!a || !b) return;
+  if (!a || !b) {
+    $("compare").innerHTML = '<div class="empty">Pick two stored bench runs.</div>';
+    return;
+  }
   const [ra, rb] = await Promise.all([fetchRun(a), fetchRun(b)]);
   const ttypes = Object.keys(ra.results?.turn_types || {});
   let html = `<div class="cfg">${cfgBadges(ra.config_snapshot, rb.config_snapshot)}</div>
