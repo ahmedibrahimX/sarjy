@@ -174,6 +174,21 @@ make a latency number look better is the hallucination failure mode with
 extra steps. Measured: tool p50 halved; the p95 tail stayed, because it
 belongs to the forecast call's connection setup (Attack 4's problem).
 
+## Rigor budget: verification went where the risk was
+
+This project was not built test-first, and that was a decision rather than
+an omission. The dominant risks were unmeasured latency claims and
+integration breakage on a deployed demo — not logic regressions in a
+small single-developer codebase — so verification effort went to
+instrumentation, live probing of every deploy (SSE error paths, auth
+gates, container smoke tests, migration runs against copies of real
+data), and the measurement protocol itself. Unit tests are deliberately
+scoped to stable pure logic: the memory layer, the schema migration, the
+sentence splitter's case table. The SSE contract tests exist because the
+event protocol crossed a threshold — three independent consumers (browser
+client, bench harness, dashboard) — where a silent shape change would
+break things the type checker cannot see.
+
 ## Two instruments: headless bench plus human protocol
 
 The bench harness (app/bench.py) drives the real /chat endpoint with fixed
