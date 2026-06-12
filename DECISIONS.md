@@ -157,6 +157,23 @@ in-flight request, since canceling only audio would leave the open stream
 refilling the queue. Measured result and the noise-vs-claim discipline
 live in LATENCY.md.
 
+## Attack 2: templated acknowledgments; cache the immutable half only
+
+The acknowledgment exists to start audio at first byte — generating it
+with an LLM call would re-add the latency it exists to hide, so it is a
+template with the city interpolated from tool arguments we already parsed.
+Only slow tools get one (remember_fact finishes faster than the ack would).
+Perceived and actual TTFA stay separate metrics: the waterfall keeps
+showing the real tool time, and the writeup reports both — an
+acknowledgment changes how waiting feels, not how long the data takes.
+
+The cache covers geocoding (city to coordinates — immutable) and
+deliberately not the weather itself: a short-TTL forecast cache would have
+been an easy extra win and a wrong one, since serving stale weather to
+make a latency number look better is the hallucination failure mode with
+extra steps. Measured: tool p50 halved; the p95 tail stayed, because it
+belongs to the forecast call's connection setup (Attack 4's problem).
+
 ## Two instruments: headless bench plus human protocol
 
 The bench harness (app/bench.py) drives the real /chat endpoint with fixed

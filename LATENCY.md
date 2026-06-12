@@ -177,7 +177,42 @@ tool call; shrink the tool itself).
 
 ### Attack 2 — tool acknowledgments (OPT_TOOL_ACK) + geocode cache (OPT_GEOCODE_CACHE)
 
-(pending)
+**Mechanism A — perceived:** on a tool call the server emits a templated
+`tool_ack` event ("Checking the weather in Cairo.") that the client speaks
+immediately. No extra LLM call — the city is interpolated from the
+already-parsed tool arguments. The ack is the first event out of round 1,
+so audio starts at first byte. It counts toward TTFA (perceived) only;
+`t_first_audio_content` keeps actual honest. `remember_fact` is
+deliberately not acknowledged: the tool finishes in ~15 ms and an ack
+would outlast it.
+
+**Mechanism B — actual:** city coordinates never change, so geocoding
+results are cached in SQLite (keyed on the lowercased city); a hit skips
+one of the weather tool's two HTTP calls.
+
+Bench evidence, weather turns, N=10 warm each (runs 1, 3, 4 — one flag
+flipped per step):
+
+| stage (ms) | baseline | +ack | +ack+cache |
+| --- | --- | --- | --- |
+| ack_ready p50 | — | 807 | 815 |
+| server_tools p50 | 309 | 310 | 149 |
+| server_tools p95 | 2140 | 1255 | 1256 |
+| full_stream_done p50 | 1978 | 2263 | 1963 |
+
+- **Ack: the perceived audio floor equals first byte (~810 ms from speech
+  end)** vs ~2-2.3 s for content — roughly a 1.4 s perceived win at zero
+  server cost (tools 309 vs 310 is the control holding).
+- **Cache: tool p50 down 52%** (310 to 149), the geocode call's share.
+- **The tool's p95 tail did not move** (1255 vs 1256): the tail belongs to
+  the forecast call's connection setup, which a geocode cache cannot
+  touch. That tail is Attack 4's keep-alive target — and note the warm
+  pool must cover Open-Meteo, not just OpenAI.
+- full_stream_done wobble across runs (1978/2263/1963) is reply-length
+  noise; no mechanism, no claim.
+
+Human validation: (pending — spoken weather turns; perceived vs actual
+land in the dashboard feed)
 
 ### Attack 3 — endpointing threshold, tap mode only (OPT_VAD_ENDPOINT)
 
