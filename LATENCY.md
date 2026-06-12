@@ -410,6 +410,10 @@ The same turn class at shipped config: **1.96 s perceived / ~3.5 s actual
 (tap), ~1.0 s perceived (hold)** — and the final 8-rep validation showed
 zero stalls, all-warm paths, and tool times within a 4 ms spread.
 
+![The same weather question, before and after: 5.0 s actual baseline vs voice starting at 1.96 s perceived with the reply streaming under audio](charts/before_after_waterfall.png)
+
+(Chart built from the measured p50s above by `charts/build_charts.py`.)
+
 ## Final bench: run 1 (all flags off) vs run 13 (all flags on)
 
 Same pipeline, same instrument, N=10 warm per turn type:
