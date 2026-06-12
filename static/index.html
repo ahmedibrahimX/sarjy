@@ -930,10 +930,11 @@ function renderWaterfall(turn) {
   $("wf-empty").style.display = "none";
   $("wf-content").style.display = "block";
   $("ttfa-num").textContent = Math.round(total);
-  $("ttfa-mini").textContent = `ttfa ${Math.round(total)} ms`;
   const perceived = turn.derived.ttfa_perceived_ms;
-  $("ttfa-perceived").textContent =
-    (perceived != null && perceived < total - 50) ? `perceived ${Math.round(perceived)} ms` : "";
+  const hasPerceived = perceived != null && perceived < total - 50;
+  $("ttfa-mini").textContent =
+    `ttfa ${Math.round(total)} ms` + (hasPerceived ? ` · perceived ${Math.round(perceived)} ms` : "");
+  $("ttfa-perceived").textContent = hasPerceived ? `perceived ${Math.round(perceived)} ms` : "";
 
   $("wf-note").textContent =
     `speech-end basis: ${turn.derived.ttfa_basis} · input: ${t.input_mode || "tap"} · ` +
