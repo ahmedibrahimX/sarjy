@@ -17,6 +17,16 @@ it.
 - Every metrics row and bench run stores a `config_snapshot` (all OPT_*
   flags, model, endpointing threshold, input mode), so each improvement is
   attributable to the flag that caused it.
+- **Provider stalls and outlier handling:** OpenAI first-token stalls form
+  a separate population (observed at 6.2 s, 6.8 s, 12-28 s, and 61 s; the
+  normal TTFT population sits at 350-1500 ms, nothing in between), so
+  TTFT > 3000 ms is classified as a stall. Primary tables always include
+  every turn; where a stall landed inside a run, a stall-excluded value is
+  given alongside, labeled. Medians were unaffected in every case —
+  exactly why p50 is the primary statistic — only p95s at small N were
+  hostage to single stalls. Stalls are never deleted from the data: they
+  are an operational class with their own mitigation (first-token timeout
+  and retry, next-week list).
 
 ## Input modes: explicit signal beats VAD
 
@@ -301,8 +311,11 @@ every turn), ms:**
 | pre-warm (1-token completion at load) | 6 | **473** | 815 |
 | keepalive, 1-token completion ping | 9 | **494** | 6178* |
 
-*one provider first-token stall landed in run 9 — the same orthogonal tail
-class observed at 6.8 s and 28 s; no client-side warming prevents it.
+*one provider first-token stall (6178 ms) landed in run 9 — the orthogonal
+tail class observed at 6.8 s and 28 s; no client-side warming prevents it.
+Stall-excluded (criterion: TTFT > 3 s, n=4): p50 unchanged at 494, p95 798
+— statistically identical to pre-warm's 815. The two warmers are tied at
+both percentiles; the apparent tail difference was entirely one stall.
 
 **The falsification arc, in order:**
 
@@ -346,6 +359,10 @@ turns each (short + long no-tool), bench runs 10-12:
 | gpt-4.1-mini (incumbent) | 413 | 605 | 412 | 1438 |
 | gpt-4o-mini | 463 | 668 | 340 | 1502 |
 | gpt-4.1-nano | 522 | 935 | 299 | 1633 |
+
+(A 61 s first-token stall — the largest specimen yet — landed in the
+4o-mini long-turn leg; stall-excluded its long p95 is 1751 ms, medians
+unchanged, verdict unaffected.)
 
 The incumbent wins every axis, and the notable finding is that **smaller is
 not faster**: nano trails mini by ~110 ms TTFT and ~27% streaming
