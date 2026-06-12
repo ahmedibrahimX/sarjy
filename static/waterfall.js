@@ -33,6 +33,27 @@ window.WF = (() => {
     return { t0, list };
   }
 
+  // TTFA composition: non-overlapping segments that sum to first audio.
+  // The single stacked bar must not paint overlapping spans or stages that
+  // run past its own total — in pipelined turns the full stream continues
+  // underneath the audio, and the rows view shows that overlap honestly.
+  function ttfaStages(turn) {
+    const c = turn.client || {};
+    const t0 = speechEnd(c);
+    const list = [
+      { lbl: "endpoint+stt", cls: "stt", from: t0, to: c.transcript_final },
+      { lbl: "send → 1st byte", cls: "net", from: c.request_sent, to: c.first_byte },
+    ];
+    if (c.first_sentence_complete != null) {
+      list.push({ lbl: "first sentence", cls: "sent", from: c.first_byte, to: c.first_sentence_complete });
+      list.push({ lbl: "tts", cls: "tts", from: c.tts_enqueue_first ?? c.first_sentence_complete, to: c.first_audio });
+    } else {
+      list.push({ lbl: "stream", cls: "stream", from: c.first_byte, to: c.stream_done });
+      list.push({ lbl: "tts", cls: "tts", from: c.tts_start ?? c.stream_done, to: c.first_audio });
+    }
+    return { t0, list };
+  }
+
   function segment(s, t0, totalMs) {
     if (s.from == null || s.to == null) return null;
     const ms = Math.max(0, s.to - s.from);
@@ -56,9 +77,9 @@ window.WF = (() => {
     }).join("");
   }
 
-  // Single stacked bar (the dashboard feed presentation).
+  // Single stacked bar (the dashboard feed presentation) — TTFA composition.
   function barHtml(turn, totalMs) {
-    const { t0, list } = stages(turn);
+    const { t0, list } = ttfaStages(turn);
     if (t0 == null || !totalMs) return "";
     const segs = list.map((s) => {
       const seg = segment(s, t0, totalMs);
@@ -68,5 +89,5 @@ window.WF = (() => {
     return `<span class="wf-track wf-stack">${segs}</span>`;
   }
 
-  return { speechEnd, stages, rowsHtml, barHtml };
+  return { speechEnd, stages, ttfaStages, rowsHtml, barHtml };
 })();
