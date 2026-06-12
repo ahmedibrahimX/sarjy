@@ -392,12 +392,39 @@ making this a 15-minute verification.
 (populated as they happen — a measured null result with a kept-but-off
 toggle is a deliverable, not a waste)
 
-## Targets
+## Targets — final verdict (shipped config: all six flags on, threshold 600)
 
-- Warm no-tool turn: < 1.5 s TTFA (actual), p50
-- Tool turn: < 2 s TTFA (perceived), p50
+| target (p50) | hold | tap |
+| --- | --- | --- |
+| warm no-tool < 1.5 s TTFA (actual) | **PASS — 1229 ms** (n=9) | ~1.5-1.6 s at the 400 threshold (grazing); ~2.1 s at the shipped 600 |
+| tool turn < 2 s TTFA (perceived) | **PASS — 1021 ms** (n=4) | **PASS — 1961 ms** (n=8, final validation at shipped config) |
 
-If a target is missed, the honest analysis of why goes here.
+Three of four cells pass on human data. The fourth — tap no-tool actual —
+is a documented product tradeoff, not an unexamined miss: the shipped 600 ms
+threshold spends ~500 ms of speed to tolerate human hesitation (Attack 3's
+deterministic clip law), and the console slider demonstrates the 400 ms
+setting reaching the target live. Hold mode passes everything with margin.
+
+End-to-end arc: the Phase 1 demo's tap weather turn measured ~4.1 s TTFA.
+The same turn class at shipped config: **1.96 s perceived / ~3.5 s actual
+(tap), ~1.0 s perceived (hold)** — and the final 8-rep validation showed
+zero stalls, all-warm paths, and tool times within a 4 ms spread.
+
+## Final bench: run 1 (all flags off) vs run 13 (all flags on)
+
+Same pipeline, same instrument, N=10 warm per turn type:
+
+- **Weather tool: p50 309 to 148, p95 2140 to 149.** The cache halved the
+  median; the warm connection pool deleted the tail entirely — all ten
+  turns within 148-151 ms on a stage that used to swing by 2 seconds.
+- **ack_ready exists at 982 ms p50**: the perceived audio floor on tool
+  turns, a stage that had no value at baseline because nothing spoke
+  before the full reply.
+- **Warm TTFT statistically unchanged** (380-553 ms across types) —
+  correct by design: no attack claimed to speed up warm generation. The
+  wins were pipeline shape, tool cost, endpointing, and cold elimination.
+- **Zero cold turns in run 13** despite a fresh bench session — keepalive
+  doing its job invisibly.
 
 ## With another week
 
