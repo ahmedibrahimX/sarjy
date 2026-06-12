@@ -15,3 +15,6 @@ candidates or presentation "what I'd do next" material.
 - Managed Postgres (Railway add-on) if live DB inspection over JDBC becomes a
   real requirement — today the token-gated snapshot export covers it (DBeaver
   opens SQLite files natively).
+- Ready cue for hold mode: a short beep/visual tick when SpeechRecognition
+  actually starts capturing — holders start talking instantly and 3/10
+  protocol turns lost their first syllables to recognition start-up.

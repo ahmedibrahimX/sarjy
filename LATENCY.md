@@ -22,9 +22,10 @@ it.
 
 Hold-to-talk releases give an exact, free speech-end signal — endpointing
 cost is ~0 by construction, which makes hold turns the control group.
-Tap mode pays the endpointing wait (measured ~865 ms on Chrome's native
-endpointer), and Attack 3's threshold curve is the price of going
-hands-free: phone calls and smart speakers have no spacebar.
+Tap mode pays the endpointing wait (first anecdote ~865 ms; the manual
+protocol below measured p50 ~1.4 s on Chrome's native endpointer), and
+Attack 3's threshold curve is the price of going hands-free: phone calls
+and smart speakers have no spacebar.
 
 Note on old data: all metrics collected before the input-mode label (and
 before the VAD, in the earliest rows) were discarded — they were measured
@@ -87,8 +88,39 @@ Reads:
 
 ### In-browser client stages (manual protocol)
 
-(to be filled: tap and hold sessions on the deployed instance, see
-collection protocol in PLAN.md)
+Human baseline on the deployed instance, 2026-06-12, one speaker/mic/room,
+fixed phrases, all flags off. Warm turns only (cold singletons noted), ms:
+
+| condition | n | TTFA p50 | TTFA p95 | endpoint p50 | send to 1st byte p50 | stream p50 | tts p50 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| tap, no-tool | 9 | 2909 | 3391 | 1427 | 824 | 494 | 4 |
+| hold, no-tool | 9 | 1356 | 4325 | 139 | 747 | 531 | 4 |
+| tap, weather | 4 | 4991 | 5113 | 1470 | 1158 | 2378 | 6 |
+| hold, weather | 5 | 3265 | 4238 | 118 | 998 | 2150 | 4 |
+
+(plus one cold turn each in tap/no-tool, hold/no-tool, tap/weather; the
+hold/weather block ran immediately after tap, so it has no cold sample)
+
+Findings:
+
+- **Chrome's endpointer costs ~1.3 s, measured on a human.** Tap endpoint
+  p50 is 1427-1470 ms vs 118-139 ms for an explicit hold release (which is
+  just the forced-finalize cost). The early single-turn anecdote said
+  ~865 ms; the distribution says it's worse. Same phrase, same network,
+  same model: hold beats tap by ~1.55 s p50 — that is Attack 3's prize and
+  its control group in one table.
+- **Hold no-tool is already at 1356 ms p50 TTFA with zero optimizations** —
+  under the 1.5 s target. The honest framing: explicit endpointing alone
+  nearly clears the warm no-tool target; the optimizations have to win the
+  tap path and the tool path.
+- **TTS engine is 4-13 ms across all 30 human turns** — browser synthesis
+  confirmed negligible at distribution level, not just anecdote.
+- **Recognition start-up clips speech in hold mode.** 3 of 10 hold turns
+  lost their first syllables ("me something interesting...") because
+  SpeechRecognition takes a beat to open the stream after the press, and
+  hold users start talking immediately. A ready cue (short beep when
+  capture actually starts) is parked in IDEAS.md — a real UX cost of
+  push-to-talk that tap mode hides.
 
 ## Attack log
 
