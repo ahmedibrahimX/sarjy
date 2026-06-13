@@ -35,7 +35,23 @@ TTS provider (browser TTS measured at ~10 ms; the pipeline shape was the
 problem). No WebRTC/telephony, no wake word, no barge-in beyond
 cancel-on-interrupt, no Postgres (snapshot export covers inspection), no
 observability stack (SQLite plus one dashboard page is the right size
-here). Parking lot for all of these: IDEAS.md.
+here).
+
+Two scope boundaries worth naming explicitly, since both are tempting and
+both were declined deliberately:
+
+- **The weather tool is current-conditions only, not a forecast feature.**
+  The tool exists to demonstrate a real LLM tool-call round-trip (geocode
+  then conditions) that the latency pipeline measures; multi-day forecast
+  is a one-parameter extension Open-Meteo supports, but building it adds
+  product surface the deep dive does not need. The "never invent tool
+  data" guardrail keeps the model honest about the boundary.
+- **Voice input is scoped to desktop Chromium.** Mobile and Firefox/Safari
+  fall back to typed input. Cross-platform voice is a speech-engineering
+  problem, not a latency one; pursuing it would be device coverage the
+  rubric is not grading. (Full reasoning in DECISIONS.md.)
+
+Parking lot for the non-goals above: IDEAS.md.
 
 ## 4. Deep dive: latency
 
