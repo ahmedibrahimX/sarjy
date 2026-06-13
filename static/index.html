@@ -502,11 +502,15 @@ function vadStop() {
 }
 
 /* ── speech recognition ─────────────────────────────── */
-// Voice is scoped to desktop Chromium. Mobile Web Speech (continuous mode,
-// single-owner mic) and Firefox/Safari (no SpeechRecognition) both fall
-// back to typed input — see the scope note in DECISIONS.md.
-const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-const SR = (IS_MOBILE ? null : window.SpeechRecognition || window.webkitSpeechRecognition);
+// Voice is scoped to desktop Chromium. Mobile (continuous-mode / single-owner
+// mic) and Firefox (no SpeechRecognition) fall back to typed input. Safari is
+// excluded explicitly: it exposes webkitSpeechRecognition but the
+// implementation is unreliable, so the presence check alone would let it
+// through — see the scope note in DECISIONS.md.
+const ua = navigator.userAgent;
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+const IS_SAFARI = /^((?!chrome|chromium|android|edg).)*safari/i.test(ua);
+const SR = (IS_MOBILE || IS_SAFARI ? null : window.SpeechRecognition || window.webkitSpeechRecognition);
 if (!SR) {
   $("banner").classList.add("show");
   $("ptt").disabled = true;
