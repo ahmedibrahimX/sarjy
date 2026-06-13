@@ -18,6 +18,14 @@ candidates or presentation "what I'd do next" material.
 - Ready cue for hold mode: a short beep/visual tick when SpeechRecognition
   actually starts capturing — holders start talking instantly and 3/10
   protocol turns lost their first syllables to recognition start-up.
+- Production-grade VAD (WebRTC VAD or Silero) to replace the energy-threshold
+  detector. Ours flags voice as louder-than-adaptive-noise-floor, so loud
+  non-speech (a door, a keyboard) can re-stamp last-voice and compress the
+  endpoint measurement — the documented artifact class. WebRTC's GMM and
+  Silero's neural classifier model what speech *is* and reject non-speech
+  noise. The energy detector was the right tool to expose the endpointing
+  cost with zero dependencies; a classifier is the swap if VAD-driven
+  endpointing ships for real.
 - Multi-day weather forecast: Open-Meteo already supports it (`daily=...`,
   up to 16 days); add an optional `when` arg to the get_weather tool and
   branch the request. Out of scope now — the tool exists to demonstrate a
