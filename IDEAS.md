@@ -18,3 +18,12 @@ candidates or presentation "what I'd do next" material.
 - Ready cue for hold mode: a short beep/visual tick when SpeechRecognition
   actually starts capturing — holders start talking instantly and 3/10
   protocol turns lost their first syllables to recognition start-up.
+- Multi-day weather forecast: Open-Meteo already supports it (`daily=...`,
+  up to 16 days); add an optional `when` arg to the get_weather tool and
+  branch the request. Out of scope now — the tool exists to demonstrate a
+  real tool-call round-trip, not to be a weather product (PRD non-goal).
+- Cross-platform voice input: mobile (single-owner mic, divergent
+  continuous-mode behavior) and Firefox/Safari (no SpeechRecognition)
+  currently fall back to typed input. A server-side streaming-STT provider
+  is the swap if cross-platform voice ever becomes a requirement — a
+  speech-engineering project, not a latency one (PRD non-goal).
