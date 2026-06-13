@@ -303,7 +303,7 @@
 </header>
 
 <div class="banner" id="banner">
-  Voice input needs Chrome or Edge (Web Speech API). You can still type to Sarjy in the latency console below.
+  Voice input needs desktop Chrome or Edge (Web Speech API). On mobile or other browsers you can still type to Sarjy in the latency console below.
 </div>
 
 <main id="main">
@@ -452,15 +452,7 @@ let t = {};
    end, and the basis for perceived time-to-first-audio. */
 const vad = { stream: null, ctx: null, raf: 0, lastVoice: 0, noise: 0.004 };
 
-// On mobile the microphone is effectively single-owner: a second
-// getUserMedia for the VAD analyser starves SpeechRecognition (it shows
-// "listening" but captures nothing). The VAD is a latency-measurement
-// instrument, not core function — skip it on mobile and the metrics fall
-// back to the interim-transcript proxy for speech end.
-const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
 async function vadStart() {
-  if (IS_MOBILE) return;
   try {
     vad.lastVoice = 0;
     vad.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -510,7 +502,11 @@ function vadStop() {
 }
 
 /* ── speech recognition ─────────────────────────────── */
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Voice is scoped to desktop Chromium. Mobile Web Speech (continuous mode,
+// single-owner mic) and Firefox/Safari (no SpeechRecognition) both fall
+// back to typed input — see the scope note in DECISIONS.md.
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const SR = (IS_MOBILE ? null : window.SpeechRecognition || window.webkitSpeechRecognition);
 if (!SR) {
   $("banner").classList.add("show");
   $("ptt").disabled = true;

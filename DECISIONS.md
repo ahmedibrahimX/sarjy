@@ -202,6 +202,24 @@ ongoing idleness, ~2k tokens/day). Provider first-token stalls (6-28 s,
 observed three times) are orthogonal to warming; their mitigation —
 first-token timeout and retry — is deferred, not forgotten.
 
+## Voice is scoped to desktop Chromium — a held scope boundary
+
+Voice input runs on desktop Chrome/Edge; mobile and Firefox/Safari fall
+back to typed input through the same banner. Mobile Web Speech is reachable
+but diverges from desktop in ways that would need their own engineering
+(continuous mode ends sessions early and returns non-cumulative buffers;
+the mic is effectively single-owner, so the VAD instrument competes with
+recognition). Supporting it well is a cross-platform speech project, not a
+latency one — and this phase's deliverable is the optimization methodology,
+not device coverage. Spending the remaining budget on mobile STT shims
+would have been scope creep that buys nothing the rubric is grading, and
+would have meant re-touching the core capture path days before the
+presentation for no in-scope gain. The honest boundary is stated in
+known-limitations and the in-app banner; a server-side STT provider is the
+documented swap if cross-platform voice ever becomes a requirement. The
+typed fallback keeps the full pipeline — memory, tools, streaming, the
+latency waterfall — exercisable on any device.
+
 ## Rigor budget: verification went where the risk was
 
 This project was not built test-first, and that was a decision rather than

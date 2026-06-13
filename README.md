@@ -119,7 +119,8 @@ Note: SQLite lives on the container filesystem — fine for a demo; a volume
 
 ## Known limitations
 
-- STT requires a Chromium browser; the typed fallback covers the rest.
+- Voice input is scoped to desktop Chrome/Edge; mobile and other browsers
+  fall back to typed input (a deliberate scope boundary — see DECISIONS.md).
 - TTS speaks only after the full reply streams in — deliberate Phase 1
   baseline; sentence-chunked streaming TTS is the Phase 2 deep-dive work.
 - Session history is in-process RAM (a restart forgets the current
