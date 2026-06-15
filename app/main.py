@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -15,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 from starlette.background import BackgroundTask
 
-from . import db, llm, memory, metrics
+from . import config, db, llm, memory, metrics, tools
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("sarjy")
@@ -23,15 +24,63 @@ log = logging.getLogger("sarjy")
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
+async def _keepalive(state) -> None:
+    """OPT_KEEPALIVE: keep upstream connections warm through idle periods.
+
+    Cold connections cost ~1-3 s of extra TTFT (with 12-28 s stalls observed
+    after long idle), and the weather tool's p95 tail was attributed to
+    forecast-connection setup — so the ping covers both OpenAI and the
+    Open-Meteo forecast host. Pings never touch state.last_llm_at: warmth
+    labels keep meaning "time since the last real turn", which is exactly
+    what makes the keepalive effect measurable.
+
+    The OpenAI ping is a real 1-token completion, not a GET: bench runs
+    5/7/8 showed a metadata ping only trims the connection-setup tail
+    (p95), while the median cold cost is provider-side serving warmth that
+    only an actual completion refreshes. Cost: ~1 token per 45 s.
+    """
+    log.info("keepalive loop running (45s interval)")
+    while True:
+        await asyncio.sleep(45)
+        try:
+            await state.oai.chat.completions.create(
+                model=state.model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
+        except Exception:  # noqa: BLE001 — best-effort ping
+            pass
+        try:
+            await state.http.get(
+                tools.FORECAST_URL,
+                params={"latitude": 0, "longitude": 0, "current": "temperature_2m"},
+            )
+        except Exception:  # noqa: BLE001 — best-effort ping
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.conn = db.connect()
-    app.state.http = httpx.AsyncClient(timeout=10)
-    app.state.oai = AsyncOpenAI()
+    # keepalive_expiry must outlive the keepalive ping interval (45 s):
+    # httpx drops idle pooled connections after 5 s by default, which
+    # silently defeated the first keepalive experiment (bench runs 5 vs 7).
+    limits = httpx.Limits(keepalive_expiry=75)
+    app.state.http = httpx.AsyncClient(timeout=10, limits=limits)
+    app.state.oai = AsyncOpenAI(
+        timeout=60,
+        http_client=httpx.AsyncClient(timeout=60, limits=limits),
+    )
     app.state.model = os.environ.get("SARJY_MODEL", "gpt-4.1-mini")
     # Per-user, per-page-load conversation history, RAM only.
     app.state.history = {}
+    keepalive_task = None
+    if config.flags()["OPT_KEEPALIVE"]:
+        keepalive_task = asyncio.create_task(_keepalive(app.state))
     yield
+    if keepalive_task:
+        keepalive_task.cancel()
+    await app.state.oai.close()
     await app.state.http.aclose()
     app.state.conn.close()
 
@@ -48,8 +97,15 @@ async def chat(request: Request):
     if not message:
         return JSONResponse({"error": "empty message"}, status_code=400)
 
-    timings = {"t_request_received": llm.now_ms()}
     state = request.app.state
+    now = llm.now_ms()
+    # Warmth heuristic: cold if the previous LLM call was >60s ago (or never).
+    last = getattr(state, "last_llm_at", None)
+    timings = {
+        "t_request_received": now,
+        "warmth": "cold" if last is None or now - last > 60_000 else "warm",
+    }
+    state.last_llm_at = now
     # A new page load sends a new session_id: the conversation resets, and
     # the SQLite facts table is the only thing that crosses sessions.
     entry = state.history.get(user_id)
@@ -73,7 +129,10 @@ async def chat(request: Request):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception:
             log.exception("turn failed")
-            error = {"type": "error", "message": "Sarjy hit an internal error on this turn."}
+            error = {
+                "type": "error",
+                "message": "Sarjy hit an internal error on this turn.",
+            }
             yield f"data: {json.dumps(error)}\n\n"
 
     return StreamingResponse(
@@ -83,14 +142,58 @@ async def chat(request: Request):
     )
 
 
+@app.post("/warmup")
+async def warmup(request: Request):
+    """OPT_PREWARM: one minimal LLM call so the first real turn is warm.
+
+    The client fires this at page load; costs about one token. Updates
+    last_llm_at because it genuinely warms the path — the next human turn
+    is warm in fact, so it should be labeled warm too.
+    """
+    if not config.flags()["OPT_PREWARM"]:
+        return {"warmed": False, "reason": "disabled"}
+    state = request.app.state
+    t0 = llm.now_ms()
+    try:
+        await state.oai.chat.completions.create(
+            model=state.model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+    except Exception:  # noqa: BLE001 — warmup must never break page load
+        return {"warmed": False}
+    state.last_llm_at = llm.now_ms()
+    return {"warmed": True, "ms": round(llm.now_ms() - t0, 1)}
+
+
+@app.get("/config")
+async def get_config(request: Request):
+    return {
+        "flags": config.flags(),
+        "endpoint_threshold_ms": config.endpoint_threshold_ms(),
+        "model": request.app.state.model,
+    }
+
+
 @app.post("/metrics")
 async def post_metrics(request: Request):
     body = await request.json()
     user_id = (body.get("user_id") or "anonymous").strip()
     turn = body.get("turn") or {}
+    # Turn payloads carry timings and labels only — never transcript text.
+    # The dashboard reading these rows is public, so keep it that way.
+    client = turn.get("client") or {}
+    snap = config.snapshot(request.app.state.model, client.get("endpoint_threshold_ms"))
+    # input_mode rides in the snapshot so the dashboard slices it like any
+    # other dimension; hold and tap distributions must never be mixed.
+    snap["input_mode"] = client.get("input_mode") or "unknown"
     # One structured JSON line per turn, plus a SQLite row for later analysis.
-    log.info(json.dumps({"event": "turn_metrics", "user_id": user_id, "turn": turn}))
-    metrics.save_turn(request.app.state.conn, user_id, turn)
+    log.info(
+        json.dumps(
+            {"event": "turn_metrics", "user_id": user_id, "turn": turn, "config": snap}
+        )
+    )
+    metrics.save_turn(request.app.state.conn, user_id, turn, snap)
     return {"ok": True}
 
 
@@ -106,15 +209,79 @@ async def delete_memory(request: Request, fact_id: int, user_id: str = ""):
     return {"deleted": deleted}
 
 
-@app.get("/admin/db")
-async def export_db(request: Request):
-    """Token-gated snapshot of the SQLite file, for offline metrics analysis."""
+def _admin_guard(request: Request) -> JSONResponse | None:
+    """None when authorized; an error response otherwise."""
     expected = os.environ.get("SARJY_ADMIN_TOKEN")
     if not expected:
-        return JSONResponse({"error": "export disabled"}, status_code=404)
+        return JSONResponse({"error": "admin endpoints disabled"}, status_code=404)
     provided = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not secrets.compare_digest(provided, expected):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return None
+
+
+@app.post("/admin/metrics/clear")
+async def clear_metrics(request: Request):
+    """Purge turn metrics (facts and bench runs untouched). Used to discard
+    rows collected under older measurement methodology or demo junk."""
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    deleted = metrics.clear_turns(request.app.state.conn)
+    log.info(json.dumps({"event": "metrics_cleared", "rows": deleted}))
+    return {"deleted": deleted}
+
+
+@app.post("/bench_runs")
+async def create_bench_run(request: Request):
+    """Store a bench run (write path is admin-gated; dashboard reads are public)."""
+    denied = _admin_guard(request)
+    if denied:
+        return denied
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    run_id = metrics.save_bench_run(
+        request.app.state.conn,
+        name,
+        body.get("config_snapshot") or {},
+        body.get("results") or {},
+    )
+    return {"id": run_id}
+
+
+@app.get("/dashboard")
+async def dashboard_page():
+    """Public latency dashboard — timings and config only, never content."""
+    return FileResponse(STATIC_DIR / "dashboard.html", media_type="text/html")
+
+
+@app.get("/api/turns")
+async def api_turns(request: Request, limit: int = 20):
+    limit = max(1, min(limit, 500))
+    return {"turns": metrics.recent_turns(request.app.state.conn, limit)}
+
+
+@app.get("/api/bench_runs")
+async def api_bench_runs(request: Request):
+    return {"runs": metrics.list_bench_runs(request.app.state.conn)}
+
+
+@app.get("/api/bench_runs/{run_id}")
+async def api_bench_run(request: Request, run_id: int):
+    run = metrics.get_bench_run(request.app.state.conn, run_id)
+    if run is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return run
+
+
+@app.get("/admin/db")
+async def export_db(request: Request):
+    """Token-gated snapshot of the SQLite file, for offline metrics analysis."""
+    denied = _admin_guard(request)
+    if denied:
+        return denied
     # Backup API gives a consistent snapshot even mid-write.
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         snapshot_path = tmp.name

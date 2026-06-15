@@ -127,6 +127,139 @@ proved otherwise. One system-prompt line fixes it: only state personal
 facts present in memory or the conversation, otherwise say you don't know.
 Empty memory must produce "I don't know", not a guess.
 
+## Companion latency dashboard, public, deliberately small
+
+A working analysis tool beats markdown tables: the dashboard reads the
+metrics and bench tables we already collect and renders the live turn feed,
+bench-run deltas, and sliceable TTFA distributions — every improvement
+attributable to a config_snapshot. It is public because the data is timings
+and labels only (no transcripts, no user ids displayed) and a shareable
+URL demos better than a screenshot; writes (bench storage, metrics purge)
+stay behind the admin token. Production would ship these same per-turn
+events to a real observability pipeline; for this project's scale, SQLite
+plus one polling page is the right size — no websockets, no Grafana, one
+CDN chart library. The waterfall renderer is shared with the debug console
+(static/waterfall.js): one stage model, two presentations.
+
+## Attack 1: sentence chunking into browser TTS, not a streaming TTS provider
+
+The pipeline's shape was the problem, not the synthesizer: browser TTS
+starts in 4-13 ms (measured across all human turns), so an external
+streaming-TTS provider would have added network latency to fix the wrong
+stage. Sentence chunking keeps the zero-cost synthesizer and deletes the
+actual wait (the stream tail after sentence one). The utterance queue is
+`speechSynthesis`'s native queue — no scheduler invented. The splitter is
+deliberately conservative (whitespace-lookahead punctuation, minimum first
+flush) and its known failure mode (mid-sentence abbreviations) is accepted
+and documented rather than engineered away for spoken-style replies that
+rarely contain them. Forced consequence, kept: barge-in now aborts the
+in-flight request, since canceling only audio would leave the open stream
+refilling the queue. Measured result and the noise-vs-claim discipline
+live in LATENCY.md.
+
+## Attack 2: templated acknowledgments; cache the immutable half only
+
+The acknowledgment exists to start audio at first byte — generating it
+with an LLM call would re-add the latency it exists to hide, so it is a
+template with the city interpolated from tool arguments we already parsed.
+Only slow tools get one (remember_fact finishes faster than the ack would).
+Perceived and actual TTFA stay separate metrics: the waterfall keeps
+showing the real tool time, and the writeup reports both — an
+acknowledgment changes how waiting feels, not how long the data takes.
+
+The cache covers geocoding (city to coordinates — immutable) and
+deliberately not the weather itself: a short-TTL forecast cache would have
+been an easy extra win and a wrong one, since serving stale weather to
+make a latency number look better is the hallucination failure mode with
+extra steps. Measured: tool p50 halved; the p95 tail stayed, because it
+belongs to the forecast call's connection setup (Attack 4's problem).
+
+## Attack 3: the endpointing threshold is a product decision, shipped at 600
+
+The threshold is exactly the maximum mid-sentence thinking pause — clipping
+is deterministic arithmetic, not bad luck — and the measured floor (the
+interim-stability guard plus Chrome's finalize, ~400-500 ms) means nothing
+below 400 pays. 400 is ~930 ms faster than Chrome's endpointer and fine
+for fluent speech, but controlled tests clipped every intended
+half-second pause at it. The deployed default is 600: a public demo's
+users are hesitant first-timers, and answering 350 ms later beats cutting
+someone off mid-thought. The console slider keeps 400 one drag away for
+the presentation, and hold-to-talk remains the zero-risk path for
+deliberate speakers. With more time: learn a per-user pause profile
+instead of one global number.
+
+## Attack 4: warmth is a serving-path property, not a connection property
+
+GET pings could not fix the cold median: first because httpx silently
+expires idle pooled connections after 5 s (runs 5 vs 7 — the fix is
+`keepalive_expiry` outliving the ping interval), and then, with the pool
+fixed, because warm connections only compress the tail (run 8). The
+median cold cost lives in the provider's serving path, and only a real
+completion refreshes it. So both shipped warmers are 1-token completions:
+pre-warm at page load (covers fresh arrivals, hides the cold cost in the
+load-to-first-utterance dead time) and keepalive every 45 s (covers
+ongoing idleness, ~2k tokens/day). Provider first-token stalls (6-28 s,
+observed three times) are orthogonal to warming; their mitigation —
+first-token timeout and retry — is deferred, not forgotten.
+
+## Voice is scoped to desktop Chromium — a held scope boundary
+
+Voice input runs on desktop Chrome/Edge; mobile and Firefox/Safari fall
+back to typed input through the same banner. Mobile Web Speech is reachable
+but diverges from desktop in ways that would need their own engineering
+(continuous mode ends sessions early and returns non-cumulative buffers;
+the mic is effectively single-owner, so the VAD instrument competes with
+recognition). Supporting it well is a cross-platform speech project, not a
+latency one — and this phase's deliverable is the optimization methodology,
+not device coverage. Spending the remaining budget on mobile STT shims
+would have been scope creep that buys nothing the rubric is grading, and
+would have meant re-touching the core capture path days before the
+presentation for no in-scope gain. The honest boundary is stated in
+known-limitations and the in-app banner; a server-side STT provider is the
+documented swap if cross-platform voice ever becomes a requirement. The
+typed fallback keeps the full pipeline — memory, tools, streaming, the
+latency waterfall — exercisable on any device.
+
+## Rigor budget: verification went where the risk was
+
+This project was not built test-first, and that was a decision rather than
+an omission. The dominant risks were unmeasured latency claims and
+integration breakage on a deployed demo — not logic regressions in a
+small single-developer codebase — so verification effort went to
+instrumentation, live probing of every deploy (SSE error paths, auth
+gates, container smoke tests, migration runs against copies of real
+data), and the measurement protocol itself. Unit tests are deliberately
+scoped to stable pure logic: the memory layer, the schema migration, the
+sentence splitter's case table. The SSE contract tests exist because the
+event protocol crossed a threshold — three independent consumers (browser
+client, bench harness, dashboard) — where a silent shape change would
+break things the type checker cannot see.
+
+## Two instruments: headless bench plus human protocol
+
+The bench harness (app/bench.py) drives the real /chat endpoint with fixed
+prompts, N repetitions, and controlled cadence — and is blind to TTFA,
+endpointing, and TTS (no microphone, no audio). The human protocol measures
+exactly those, but every spoken sample carries mic, room, and phrasing
+variance, and costs minutes per condition. They are complements with
+disjoint blind spots: server-side attacks (geocode cache, keep-alive,
+model A/B) take their primary evidence from the bench; client-side attacks
+(pipelining, acknowledgments, endpointing) from human turns, with the bench
+as the control proving the server didn't move. Results live in separate
+tables (bench_run vs metrics) so neither contaminates the other, and
+re-benching after every attack is the tripwire for unintended server-side
+regressions, not just the scoreboard for intended wins.
+
+Attack 1 is the worked example. The bench diff (run 1 vs run 2) shows
+deltas of +10, -67, and +114 ms scattered in both directions across stages
+the client-side flag cannot causally touch: run-to-run noise from
+nondeterministic reply lengths, provider load, and Open-Meteo's tail. The
+standard cuts both ways — the -67 ms TTFT "improvement" is dismissed along
+with the +114 ms "regression". The only claim that survives is the one
+with a mechanism (first audio stops waiting for the stream tail), measured
+on human turns: -387 ms tap / -127 ms hold at p50, with endpointing
+unchanged (1423 vs 1427 ms) as the attribution control.
+
 ## Clock discipline in the latency waterfall
 
 Client and server timestamps come from different clocks, so no duration is

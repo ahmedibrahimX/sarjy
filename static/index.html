@@ -120,10 +120,12 @@
   }
 
   .banner {
-    max-width: 680px; margin: 0 auto 8px; padding: 10px 14px;
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 30; width: min(680px, calc(100vw - 24px));
+    padding: 10px 14px;
     border: 1px solid var(--amber-dim); border-radius: var(--radius);
-    background: color-mix(in srgb, var(--amber) 8%, transparent);
-    font-size: .85rem; display: none;
+    background: color-mix(in srgb, var(--amber) 12%, var(--surface));
+    font-size: .85rem; line-height: 1.4; display: none;
   }
   .banner.show { display: block; }
 
@@ -224,6 +226,7 @@
     display: flex; align-items: center; gap: 10px;
     padding: 10px 14px; font-size: .75rem; color: var(--muted);
   }
+  .console summary::-webkit-details-marker { display: none; } /* Safari keeps it despite list-style:none */
   .console summary::before { content: "▸"; transition: transform .2s; }
   .console[open] summary::before { transform: rotate(90deg); }
   .console summary .ttfa-mini { margin-left: auto; color: var(--amber); }
@@ -234,6 +237,7 @@
   }
   .ttfa-big .num { font-size: 2rem; font-weight: 500; color: var(--amber); }
   .ttfa-big .label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; }
+  .ttfa-big .perceived { font-size: .75rem; color: var(--green); }
 
   .wf { display: flex; flex-direction: column; gap: 6px; }
   .wf-row { display: grid; grid-template-columns: 150px 1fr 64px; gap: 10px; align-items: center; font-size: .72rem; }
@@ -244,6 +248,7 @@
   .wf-bar.stt    { background: var(--green); opacity: .85; }
   .wf-bar.net    { background: var(--blue);  opacity: .85; }
   .wf-bar.stream { background: var(--blue);  opacity: .5; }
+  .wf-bar.sent   { background: #b48ead;      opacity: .9; }
   .wf-bar.tts    { background: var(--amber); opacity: .9; }
   .wf-server {
     margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
@@ -253,6 +258,13 @@
   .wf-server .row { display: flex; justify-content: space-between; }
   .wf-server .row span:last-child { color: var(--ink); }
   .wf-note { margin-top: 8px; font-size: .65rem; color: var(--muted); opacity: .8; }
+
+  .ep-row {
+    display: none; align-items: center; gap: 10px; margin-top: 12px;
+    font-size: .7rem; color: var(--muted);
+  }
+  .ep-row #ep-value { color: var(--amber); }
+  .ep-row input[type="range"] { flex: 1; accent-color: var(--amber); }
 
   .type-fallback { display: flex; gap: 8px; margin-top: 12px; }
   .type-fallback input {
@@ -294,7 +306,7 @@
 </header>
 
 <div class="banner" id="banner">
-  Voice input needs Chrome or Edge (Web Speech API). You can still type to Sarjy in the latency console below.
+  Voice input needs desktop Chrome or Edge (Web Speech API). On mobile or other browsers you can still type to Sarjy in the latency console below.
 </div>
 
 <main id="main">
@@ -327,10 +339,15 @@
         <div class="ttfa-big">
           <span class="num" id="ttfa-num">—</span>
           <span class="label">ms · time to first audio</span>
+          <span class="perceived" id="ttfa-perceived"></span>
         </div>
         <div class="wf" id="wf-rows"></div>
         <div class="wf-server" id="wf-server"></div>
         <div class="wf-note" id="wf-note">client rows use the client clock, server readout uses the server clock — never mixed. TTFA is measured entirely client-side.</div>
+      </div>
+      <div class="ep-row" id="ep-row">
+        <label for="ep-slider">vad endpoint threshold <span id="ep-value"></span></label>
+        <input type="range" id="ep-slider" min="250" max="900" step="50">
       </div>
       <form class="type-fallback" id="type-form">
         <input id="type-input" placeholder="no mic? type to Sarjy instead…" autocomplete="off">
@@ -351,6 +368,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="/waterfall.js"></script>
 <script>
 "use strict";
 
@@ -370,6 +388,26 @@ const userId = (() => {
 /* a fresh conversation per page load — only stored facts cross sessions */
 const sessionId = (crypto.randomUUID && crypto.randomUUID()) ||
   "s-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+
+/* server config: optimization flags + endpointing threshold (Phase 2) */
+let CFG = { flags: {}, endpoint_threshold_ms: null, model: null };
+let endpointThresholdMs = 400; // effective value; the console slider overrides
+fetch("/config").then((r) => r.json()).then((c) => {
+  CFG = c;
+  if (c.flags?.OPT_PREWARM) fetch("/warmup", { method: "POST" }).catch(() => {});
+  if (c.endpoint_threshold_ms) endpointThresholdMs = c.endpoint_threshold_ms;
+  if (c.flags?.OPT_VAD_ENDPOINT) {
+    const row = document.getElementById("ep-row");
+    const slider = document.getElementById("ep-slider");
+    row.style.display = "flex";
+    slider.value = endpointThresholdMs;
+    document.getElementById("ep-value").textContent = `${endpointThresholdMs} ms`;
+    slider.addEventListener("input", () => {
+      endpointThresholdMs = Number(slider.value);
+      document.getElementById("ep-value").textContent = `${endpointThresholdMs} ms`;
+    });
+  }
+}).catch(() => {});
 
 /* ── state machine: idle | listening | thinking | speaking ── */
 let state = "idle";
@@ -433,10 +471,29 @@ async function vadStart() {
       const rms = Math.sqrt(sum / buf.length);
       if (rms < vad.noise * 2) vad.noise = vad.noise * 0.95 + rms * 0.05; // track floor while quiet
       if (rms > Math.min(0.06, Math.max(0.01, vad.noise * 4))) vad.lastVoice = Date.now();
+      maybeVadEndpoint();
       vad.raf = requestAnimationFrame(tick);
     };
     tick();
   } catch { /* best-effort: waterfall falls back to the interim-result proxy */ }
+}
+
+/* OPT_VAD_ENDPOINT (Attack 3, tap mode only): stop recognition ourselves
+   after `endpointThresholdMs` of measured silence instead of waiting out
+   Chrome's ~1.4 s endpointer. Guards: some speech must have been heard,
+   something must have been recognized, and the interim transcript must
+   have been stable for 250 ms (protects slow speakers mid-thought). */
+function maybeVadEndpoint() {
+  if (state !== "listening" || holdActive) return;
+  if (!CFG.flags?.OPT_VAD_ENDPOINT || t.input_mode !== "tap") return;
+  if (t.vad_endpoint_fired || !vad.lastVoice) return;
+  if (t.last_interim == null && t.transcript_final == null) return;
+  const now = Date.now();
+  const interimQuiet = t.last_interim == null ? Infinity : now - t.last_interim;
+  if (now - vad.lastVoice >= endpointThresholdMs && interimQuiet >= 250) {
+    t.vad_endpoint_fired = true; // rides into metrics for attribution
+    rec?.stop();
+  }
 }
 
 function vadStop() {
@@ -448,17 +505,29 @@ function vadStop() {
 }
 
 /* ── speech recognition ─────────────────────────────── */
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+// Voice is scoped to desktop Chromium. Mobile (continuous-mode / single-owner
+// mic) and Firefox (no SpeechRecognition) fall back to typed input. Safari is
+// excluded explicitly: it exposes webkitSpeechRecognition but the
+// implementation is unreliable, so the presence check alone would let it
+// through — see the scope note in DECISIONS.md.
+const ua = navigator.userAgent;
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+const IS_SAFARI = /^((?!chrome|chromium|android|edg).)*safari/i.test(ua);
+const SR = (IS_MOBILE || IS_SAFARI ? null : window.SpeechRecognition || window.webkitSpeechRecognition);
 if (!SR) {
   $("banner").classList.add("show");
   $("ptt").disabled = true;
   $("console").open = true;
+  // mic is disabled here, so don't invite a tap — point at the typed box
+  const helloP = document.querySelector("#hello p");
+  if (helloP) helloP.textContent = "Type to me in the box below.";
+  $("hint").textContent = "use desktop Chrome for voice — type below instead";
 }
 let rec = null;
 
 function startListening() {
   speechSynthesis.cancel();
-  t = {};
+  t = { input_mode: "tap" }; // upgraded to "hold" if the press is held to release
   vadStart();
   const bubble = addBubble("user", "…");
   let finalText = "";
@@ -520,7 +589,11 @@ let pressStartedListening = false;
 
 function pressDown() {
   if (!SR || state === "thinking") return;
-  if (state === "speaking") { speechSynthesis.cancel(); setState("idle"); }
+  if (state === "speaking") {
+    currentTurnAbort?.abort(); // pipelined turns may still be streaming
+    speechSynthesis.cancel();
+    setState("idle");
+  }
   holdActive = true;
   if (state === "listening") { pressStartedListening = false; return; } // tap-to-stop on release
   pressT0 = Date.now();
@@ -535,6 +608,8 @@ function pressUp() {
   holdActive = false;
   if (state !== "listening") return;
   if (!startedHere || wasHold) {
+    if (startedHere) t.input_mode = "hold";
+    t.release = Date.now(); // explicit end signal: perceived latency starts here
     rec?.stop(); // tap while already listening, or hold released: send now
   } else {
     $("hint").textContent = "listening — tap when done"; // quick tap: auto-endpoint mode
@@ -570,12 +645,14 @@ $("type-form").addEventListener("submit", (e) => {
   $("type-input").value = "";
   speechSynthesis.cancel();
   const now = Date.now();
-  t = { speech_end: now, transcript_final: now, typed: true };
+  t = { speech_end: now, transcript_final: now, typed: true, input_mode: "typed" };
   addBubble("user", text);
   sendTurn(text);
 });
 
 /* ── one turn: POST /chat, read SSE stream ──────────── */
+let currentTurnAbort = null;
+
 async function sendTurn(text) {
   setState("thinking");
   const reply = addBubble("sarjy", "");
@@ -583,10 +660,105 @@ async function sendTurn(text) {
   t.request_sent = Date.now();
   let full = "";
   let server = null;
+  const aborter = new AbortController();
+  currentTurnAbort = aborter;
+
+  /* sentence pipelining (OPT_SENTENCE_PIPELINING): speak sentence 1 the
+     moment its boundary arrives, queue later sentences as they complete —
+     speechSynthesis queues utterances natively. */
+  const pipelined = CFG.flags?.OPT_SENTENCE_PIPELINING === true;
+  let spokenChars = 0;
+  let pendingUtterances = 0;
+  let streamComplete = false;
+
+  const maybeFinish = () => {
+    if (t.first_audio != null && streamComplete) finishTurn(server);
+  };
+
+  const settle = (e) => {
+    pendingUtterances--;
+    if (pendingUtterances === 0 && streamComplete && state === "speaking") setState("idle");
+    if (pendingUtterances === 0 && !streamComplete && state === "speaking") {
+      setState("thinking"); // the ack finished before the answer arrived
+    }
+    const canceled = e && (e.error === "canceled" || e.error === "interrupted");
+    if (e && e.type === "error" && !canceled && t.first_audio == null && streamComplete) {
+      finishTurn(server); // audio failed outright; keep the turn's metrics
+    }
+  };
+
+  /* spoken acknowledgment (OPT_TOOL_ACK): audio during the tool round-trip.
+     Counts toward perceived TTFA only — never toward actual/content. */
+  const speakAck = (text) => {
+    if (!text || aborter.signal.aborted) return;
+    const u = new SpeechSynthesisUtterance(text);
+    pendingUtterances++;
+    u.onstart = () => {
+      if (t.first_audio_any == null) t.first_audio_any = Date.now();
+      setState("speaking");
+    };
+    u.onend = settle;
+    u.onerror = settle;
+    speechSynthesis.speak(u);
+  };
+
+  const enqueueSpeech = (chunk) => {
+    chunk = chunk.trim();
+    if (!chunk || aborter.signal.aborted) return;
+    const u = new SpeechSynthesisUtterance(chunk);
+    pendingUtterances++;
+    if (t.tts_enqueue_first == null) {
+      t.tts_enqueue_first = Date.now();
+      u.onstart = () => {
+        t.first_audio = Date.now();
+        t.first_audio_content = t.first_audio;
+        setState("speaking");
+        maybeFinish();
+      };
+    }
+    u.onend = settle;
+    u.onerror = settle;
+    speechSynthesis.speak(u);
+  };
+
+  // Sentence boundary: terminal punctuation followed by whitespace or end.
+  // The lookahead keeps decimals ("3.5") intact; the minimum first-flush
+  // length avoids speaking a clipped fragment like an abbreviation's dot.
+  const findCut = (buf, isFirst) => {
+    const re = /[.!?؟](?=\s|$)/g;
+    let m;
+    while ((m = re.exec(buf)) !== null) {
+      const cut = m.index + 1;
+      if (isFirst && cut < 12) continue;
+      return cut;
+    }
+    return -1;
+  };
+
+  const flushSentences = (final) => {
+    for (;;) {
+      const pending = full.slice(spokenChars);
+      const cut = findCut(pending, spokenChars === 0);
+      if (cut < 0) break;
+      if (t.first_sentence_complete == null) t.first_sentence_complete = Date.now();
+      enqueueSpeech(pending.slice(0, cut));
+      spokenChars += cut;
+    }
+    if (final) {
+      const rest = full.slice(spokenChars).trim();
+      if (rest) {
+        if (t.first_sentence_complete == null) t.first_sentence_complete = Date.now();
+        enqueueSpeech(rest);
+      }
+      spokenChars = full.length;
+    }
+  };
+
   try {
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: aborter.signal,
       body: JSON.stringify({
         user_id: userId,
         session_id: sessionId,
@@ -618,10 +790,13 @@ async function sendTurn(text) {
             full += ev.text;
             reply.textContent = full;
             scrollDown();
+            if (pipelined) flushSentences(false);
+          } else if (ev.type === "tool_ack") {
+            speakAck(ev.text);
           } else if (ev.type === "tool") {
-            if (ev.status === "start") {
+            if (ev.status === "start" && state !== "speaking") {
               setState("thinking", ev.name === "get_weather" ? "checking weather…" : "saving a memory…");
-            } else if (ev.name === "remember_fact") {
+            } else if (ev.status === "end" && ev.name === "remember_fact") {
               loadMemories();
             }
           } else if (ev.type === "done") {
@@ -639,9 +814,21 @@ async function sendTurn(text) {
       setState("idle");
       return;
     }
-    speak(full, server);
+    if (pipelined) {
+      streamComplete = true;
+      flushSentences(true);
+      maybeFinish();
+      if (pendingUtterances === 0 && state !== "speaking") setState("idle");
+    } else {
+      speak(full, server);
+    }
   } catch (err) {
     reply.classList.remove("streaming");
+    if (err.name === "AbortError") {
+      // barge-in: the user started a new turn mid-stream
+      if (!reply.textContent) reply.remove();
+      return;
+    }
     reply.classList.add("error");
     reply.textContent = err.message;
     setState("idle");
@@ -656,6 +843,7 @@ function speak(text, server) {
   const u = new SpeechSynthesisUtterance(text);
   u.onstart = () => {
     t.first_audio = Date.now();
+    t.first_audio_content = t.first_audio;
     setState("speaking");
     finishTurn(server);
   };
@@ -716,15 +904,18 @@ function finishTurn(server) {
   if (t.posted) return;
   t.posted = true;
   const d = (a, b) => (t[a] != null && t[b] != null) ? Math.max(0, t[b] - t[a]) : null;
-  // Perceived-latency basis: true acoustic speech end (VAD), else the
+  // Perceived-latency basis, per input mode: an explicit release (hold mode
+  // or manual tap-stop) wins; else true acoustic speech end (VAD), else the
   // last interim transcript update, else Chrome's (late) speech_end stamp.
-  const t0 = t.speech_end_vad ?? t.last_interim ?? t.speech_end;
+  const t0 = t.release ?? t.speech_end_vad ?? t.last_interim ?? t.speech_end;
   const turn = {
-    client: { ...t },
+    // effective threshold is null while Chrome's native endpointer decides
+    client: { ...t, endpoint_threshold_ms: CFG.flags?.OPT_VAD_ENDPOINT ? endpointThresholdMs : null },
     server: server,
     derived: {
-      ttfa_ms: (t.first_audio != null && t0 != null) ? Math.max(0, t.first_audio - t0) : null,
-      ttfa_basis: t.typed ? "typed" : (t.speech_end_vad ? "vad" : (t.last_interim ? "interim" : "finalize")),
+      ttfa_ms: ((t.first_audio_content ?? t.first_audio) != null && t0 != null) ? Math.max(0, (t.first_audio_content ?? t.first_audio) - t0) : null,
+      ttfa_perceived_ms: ((t.first_audio_any ?? t.first_audio) != null && t0 != null) ? Math.max(0, (t.first_audio_any ?? t.first_audio) - t0) : null,
+      ttfa_basis: t.typed ? "typed" : (t.release ? "release" : (t.speech_end_vad ? "vad" : (t.last_interim ? "interim" : "finalize"))),
       endpoint_ms: (t.transcript_final != null && t0 != null) ? Math.max(0, t.transcript_final - t0) : null,
       send_to_first_byte_ms: d("request_sent", "first_byte"),
       stream_ms: d("first_byte", "stream_done"),
@@ -754,29 +945,17 @@ function renderWaterfall(turn) {
   $("wf-empty").style.display = "none";
   $("wf-content").style.display = "block";
   $("ttfa-num").textContent = Math.round(total);
-  $("ttfa-mini").textContent = `ttfa ${Math.round(total)} ms`;
+  const perceived = turn.derived.ttfa_perceived_ms;
+  const hasPerceived = perceived != null && perceived < total - 50;
+  $("ttfa-mini").textContent =
+    `ttfa ${Math.round(total)} ms` + (hasPerceived ? ` · perceived ${Math.round(perceived)} ms` : "");
+  $("ttfa-perceived").textContent = hasPerceived ? `perceived ${Math.round(perceived)} ms` : "";
 
-  const t0 = t.speech_end_vad ?? t.last_interim ?? t.speech_end;
-  const stages = [
-    { lbl: "stt endpoint+final", cls: "stt",  from: t0,             to: t.transcript_final },
-    { lbl: "send → 1st byte", cls: "net",    from: t.request_sent, to: t.first_byte },
-    { lbl: "stream rest",     cls: "stream", from: t.first_byte,   to: t.stream_done },
-    { lbl: "tts engine",      cls: "tts",    from: t.tts_start,    to: t.first_audio },
-  ];
   $("wf-note").textContent =
-    `speech-end basis: ${turn.derived.ttfa_basis} · client rows use the client clock, ` +
-    `server readout uses the server clock — never mixed. TTFA is measured entirely client-side.`;
-  $("wf-rows").innerHTML = stages.map((s) => {
-    if (s.from == null || s.to == null) return "";
-    const ms = Math.max(0, s.to - s.from);
-    const left = Math.min(100, ((s.from - t0) / total) * 100);
-    const width = Math.max(0.5, Math.min(100 - left, (ms / total) * 100));
-    return `<div class="wf-row">
-      <span class="lbl">${s.lbl}</span>
-      <span class="wf-track"><span class="wf-bar ${s.cls}" style="left:${left}%;width:${width}%"></span></span>
-      <span class="ms">${Math.round(ms)} ms</span>
-    </div>`;
-  }).join("");
+    `speech-end basis: ${turn.derived.ttfa_basis} · input: ${t.input_mode || "tap"} · ` +
+    `client rows use the client clock, server readout uses the server clock — never mixed. ` +
+    `TTFA is measured entirely client-side.`;
+  $("wf-rows").innerHTML = WF.rowsHtml({ client: t }, total);
 
   const server = turn.server;
   if (server) {
