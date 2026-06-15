@@ -5,6 +5,11 @@ it remembers you across sessions, and it can check real weather anywhere.
 Every turn is instrumented end-to-end: the latency console in the UI shows a
 per-stage waterfall with time-to-first-audio as the headline metric.
 
+The deep dive is latency. Against a measured baseline of ~5.0 s
+time-to-first-audio on a weather turn, the shipped configuration answers at
+~1.96 s perceived / ~1.0 s in hold-to-talk mode — full before/after,
+methodology, and failed experiments in [LATENCY.md](LATENCY.md).
+
 Start here: [PRD.md](PRD.md) (intent) · [LATENCY.md](LATENCY.md) (results) ·
 [DECISIONS.md](DECISIONS.md) (reasoning).
 
@@ -16,8 +21,9 @@ cp .env.example .env   # add your OPENAI_API_KEY
 uv run --env-file .env uvicorn app.main:app --reload
 ```
 
-Open http://127.0.0.1:8000 in **Chrome or Edge** (the Web Speech API doesn't
-ship in Firefox/Safari — there's a typed fallback in the latency console).
+Open http://127.0.0.1:8000 in **desktop Chrome or Edge**. Voice is scoped
+there; mobile, Firefox, and Safari fall back to typed input in the latency
+console (see Known limitations).
 
 Tests: `uv run pytest`
 
@@ -28,7 +34,8 @@ Tests: `uv run pytest`
 - **Remembers across sessions** — tell it "my favorite color is blue", close
   the browser, come back, ask. Facts live in SQLite keyed by a per-browser id.
 - **Real external data** — current weather for any city via Open-Meteo,
-  called as an LLM tool.
+  called as an LLM tool (current conditions only; forecast is a documented
+  non-goal — the tool exists to demonstrate a real round-trip).
 
 ### Why Open-Meteo?
 
@@ -54,23 +61,28 @@ flowchart LR
     API --> MET[(SQLite metrics)]
 ```
 
-One FastAPI app, one SQLite file, one static HTML page. The full request flow
-with every timestamp is in [PLAN.md](PLAN.md); every non-obvious choice is
-argued in [DECISIONS.md](DECISIONS.md).
+One FastAPI app, one SQLite file, one static HTML page. Intent and scope are
+in [PRD.md](PRD.md); every non-obvious choice is argued in
+[DECISIONS.md](DECISIONS.md).
 
 ## Latency instrumentation
 
-Each turn captures a waterfall across both clocks — client
-(`t_speech_end_vad` from a mic-energy VAD that catches the true acoustic
-speech end Chrome's events hide, `t_speech_end`, `t_transcript_final`,
-`t_request_sent`, `t_first_byte`, `t_stream_done`, `t_tts_start`,
-`t_first_audio`) and server
+Each turn captures a waterfall across both clocks — client (a mic-energy
+VAD records the true acoustic speech end that Chrome's events hide, plus
+`t_transcript_final`, `t_request_sent`, `t_first_byte`,
+`t_first_sentence_complete`, `t_tts_enqueue_first`, `t_stream_done`, and the
+`first_audio_any`/`first_audio_content` split) and server
 (`t_request_received`, `t_llm_first_token`, per-tool start/end,
 `t_response_complete`). Client and server stamps are never subtracted across
 clocks; the headline **time-to-first-audio** is pure client-side, so it's
-immune to skew. The UI renders the last turn's waterfall in the collapsible
-latency console; the server logs one JSON line per turn and persists it to
-the `metrics` table for offline analysis.
+immune to skew.
+
+Two TTFA metrics are tracked and never conflated: **actual** (speech end to
+first audio of substantive content) and **perceived** (to first audio of any
+speech, including a tool acknowledgment). The UI renders the last turn's
+waterfall in the collapsible latency console; the server stores one labelled
+row per turn, and a public dashboard at `/dashboard` shows the live turn
+feed, before/after bench comparisons, and a sliceable TTFA distribution.
 
 ## Configuration
 
@@ -114,15 +126,17 @@ docker build -t sarjy .
 docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... sarjy
 ```
 
-Note: SQLite lives on the container filesystem — fine for a demo; a volume
-(or managed Postgres) would be the first change for anything real.
+Note: the deployed demo keeps SQLite on a Railway volume, so facts and
+metrics survive redeploys. Managed Postgres would be the move only if live
+multi-client inspection became a requirement (parked in IDEAS.md).
 
 ## Known limitations
 
 - Voice input is scoped to desktop Chrome/Edge; mobile and other browsers
   fall back to typed input (a deliberate scope boundary — see DECISIONS.md).
-- TTS speaks only after the full reply streams in — deliberate Phase 1
-  baseline; sentence-chunked streaming TTS is the Phase 2 deep-dive work.
+- With `OPT_SENTENCE_PIPELINING` (on by default), TTS starts on the first
+  sentence while the rest streams; the conservative splitter can mis-split
+  on a rare mid-sentence abbreviation, accepted for spoken-style replies.
 - Session history is in-process RAM (a restart forgets the current
   conversation, never the stored facts).
 - No auth: the per-browser UUID scopes memory but is not a security boundary.
